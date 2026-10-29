@@ -11,6 +11,9 @@ HEADING = re.compile(
     re.I,
 )
 
+STRONG_HEADING = re.compile(r"^(?:(?:section|part)\s+\d+|(?:appendix|annex|schedule|annexe)\s+[a-z0-9]{1,3}\b|\d{1,2}\.\d{1,2}(?:\.\d{1,2})*)"
+                            r"\.?\s*[-:–.]?\s+[A-Z]", re.I)
+
 
 @dataclass
 class Block:
@@ -36,32 +39,53 @@ def _table_text(rows: list[list]) -> str:
     return "\n".join(" | ".join((c or "").replace("\n", " ").strip() for c in row) for row in rows if any(row))
 
 
+def _styled_heading(text: str, size: float, bold: bool, body_size: float) -> bool:
+    t = text.strip()
+    if not t or len(t.split()) > 10 or t.endswith((".", ",", ";", ":")) or not t[0].isalnum():
+        return False
+    return (bold or size >= body_size + 1.5) and any(c.isalpha() for c in t)
+
+
 def parse_pdf(content: bytes) -> Parsed:
     doc = pymupdf.open(stream=content, filetype="pdf")
-    blocks: list[Block] = []
-    total = 0
-    for pno, page in enumerate(doc, start=1):
-        tables = []
+    pages = []
+    sizes: list[float] = []
+    for page in doc:
         try:
             tables = list(page.find_tables())
         except Exception:
             tables = []
         boxes = [pymupdf.Rect(t.bbox) for t in tables]
         items = []
-        for x0, y0, x1, y1, text, *_ in page.get_text("blocks", sort=True):
-            if any(pymupdf.Rect(x0, y0, x1, y1).intersects(b) for b in boxes):
+        for b in page.get_text("dict", sort=True)["blocks"]:
+            if b.get("type") != 0 or any(pymupdf.Rect(b["bbox"]).intersects(x) for x in boxes):
                 continue
-            text = re.sub(r"[ \t]+", " ", text).strip()
-            if text:
-                items.append((y0, Block(text, pno, heading=is_heading(text))))
+            for line in b["lines"]:
+                spans = [s for s in line["spans"] if s["text"].strip()]
+                if not spans:
+                    continue
+                text = re.sub(r"[ \t]+", " ", " ".join(s["text"] for s in spans)).strip()
+                bold = all(s["flags"] & 16 or "bold" in s["font"].lower() for s in spans)
+                sizes += [s["size"] for s in spans for _ in range(max(1, len(s["text"]) // 20))]
+                items.append((line["bbox"][1], text, max(s["size"] for s in spans), bold, False))
         for t, box in zip(tables, boxes):
             text = _table_text(t.extract())
             if text:
-                items.append((box.y0, Block(text, pno, table=True)))
-        for _, b in sorted(items, key=lambda i: i[0]):
-            total += len(b.text)
-            blocks.append(b)
-    if total < MIN_TEXT_CHARS:
+                items.append((box.y0, text, 0.0, False, True))
+        pages.append(sorted(items, key=lambda i: i[0]))
+    body = sorted(sizes)[len(sizes) // 2] if sizes else 10.0
+    blocks: list[Block] = []
+    for pno, items in enumerate(pages, start=1):
+        for _, text, size, bold, table in items:
+            styled = bold or size >= body + 1.0
+            heading = not table and len(text.split()) <= 14 and not text.endswith(".") and (
+                bool(STRONG_HEADING.match(text)) or _styled_heading(text, size, bold, body) or (styled and is_heading(text)))
+            last = blocks[-1] if blocks else None
+            if not heading and not table and last and not last.heading and not last.table and last.page == pno:
+                last.text += "\n" + text
+            else:
+                blocks.append(Block(text, pno, heading=heading, table=table))
+    if sum(len(b.text) for b in blocks) < MIN_TEXT_CHARS:
         return Parsed([], doc.page_count, "no text layer (scanned PDF?); OCR is not supported in version 1")
     return Parsed(blocks, doc.page_count)
 
