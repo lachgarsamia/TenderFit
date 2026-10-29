@@ -3,9 +3,23 @@
 ## Decisions
 - Package modules are added as each release needs them (R0: ingest, jobs, api).
 - Migrations are plain numbered SQL files applied in order by a tiny runner; no ORM.
+- Raw releases are stored as text, not jsonb: the API emits non-standard `Infinity` (e.g. `maximumLotsBidPerSupplier`),
+  which jsonb rejects. Normalised fields drop non-finite numbers to null.
+- `version_no` is computed in the `notice_version_numbered` view (order by published_at, release_id) instead of stored,
+  so out-of-order arrival never renumbers an immutable row. UPDATE on notice_version/raw_release raises.
+- Status freshness = the import watermark: a successful incremental run up to T has seen every UK12/UK6 before T.
+  The API re-derives the time-dependent part (deadline passed, check stale) at read time.
+- Opportunity status = the most alive lot (open > unverified > closed > awarded > cancelled). An award with no
+  relatedLots applies to all lots. UK7 (contract details) also counts as award; UK5 is ignored.
+- Date-only deadlines are read as 23:59:59 Europe/London; naive timestamps as Europe/London.
+- Lots are the union of lots across all versions (title/quantity from the current one), so derived state does not
+  depend on arrival order. Lots dropped by an amendment are left for R2 change detection to flag.
+- Buyer name comes from that buyer's most recent notice, for the same reason.
+- Shortlist (`open_only`) includes `unverified`, as Table 20 says ("yes, with a warning").
 
 ## Live API findings (probed 2026-10-29, window 2026-10-27)
-- No key, no auth. 200 in ~0.5s per 100-release page. No 429/503 seen yet; Retry-After handling untested live.
+- No key, no auth. ~0.5s per 100-release page, but sustained paging gets throttled: 2-3 responses of 429/503 per
+  56 pages in the two-week import, all recovered via Retry-After. A two-week backfill takes 4-7 minutes.
 - `links.next` is a full URL with an opaque base64 `cursor`; absent on the last page. Releases are not sorted by date.
 - `stages=tender` (the documented default) returned 9 releases/day, all legacy-regime (`legalBasis 32014L0024`).
   Unfiltered returned 483/day, of which 74 `tender`+UK4, 23 `tenderUpdate`+UK4, 4 `tenderCancellation`+UK12.
@@ -23,4 +37,6 @@
   drops UK4 notices and UK6/UK12 are needed for status anyway (Table 20). Raw releases are all stored.
 
 ## Open questions
+- Timezone of `updatedFrom`/`updatedTo` is not documented. The 1h overlap covers a BST offset either way.
+- A full 12-month pull is ~1,700 pages at ~5s/page (throttling included): about 2-3 hours.
 - Does `stages=planning,tender,award` include PA2023 notices, or only the unfiltered call? Check in source study.
