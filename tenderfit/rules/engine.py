@@ -95,7 +95,7 @@ def _settle(ok: bool, fact: Fact, ctx: Context, params: list[str], what: str, pr
         return RuleResult(NEEDS, f"{what}: {v.reason}", facts=[fact.id], params=params,
                           question=v.question or f"Please update: {fact.label}", needs_human="G4")
     if workload and not fact.confirmed_for_lot:
-        return RuleResult(NEEDS, f"{what} on declared facts; workload not confirmed for this lot", basis="declared",
+        return RuleResult(NEEDS, f"{what} (declared); current workload not confirmed for this lot", basis="declared",
                           facts=[fact.id], params=params, question=f"Can you confirm '{fact.label}' for this order?",
                           needs_human="G3")
     if v.stale:
@@ -144,8 +144,13 @@ def evaluate(cond: Condition, facts: list[Fact], ctx: Context, *, category: str 
         if best is None:
             return RuleResult(UNKNOWN, f"profile has no value for {cond.fact}", facts=[f.id for f in known], params=params)
         ok, f, v = best
-        op = ">=" if cond.kind == "at_least" else "<="
-        return _settle(ok, f, ctx, params, f"{cond.fact} {v:g} {op} {bound:g}", proof,
+        name, unit = {"capacity.lead_days": ("lead time", "days"), "capacity.max_units": ("capacity", "units")}.get(
+            cond.fact, (cond.fact.split(".")[-1].replace("_", " "), ""))
+        if cond.kind == "at_most":
+            what = f"{name} {v:g} {unit} {'is within' if ok else 'exceeds'} the required {bound:g}".replace("  ", " ")
+        else:
+            what = f"{name} {v:,g} {unit} {'covers' if ok else 'falls short of'} the required {bound:,g}".replace("  ", " ")
+        return _settle(ok, f, ctx, params, what, proof,
                        workload=cond.fact in WORKLOAD_PATHS or cond.fact.split('.')[0] in WORKLOAD_PATHS)
 
     if cond.kind == "within_years":
@@ -160,7 +165,7 @@ def evaluate(cond: Condition, facts: list[Fact], ctx: Context, *, category: str 
             hits.append((end is not None and start <= end <= anchor
                          and (min_units is None or (units or 0) >= min_units), f))
         ok_facts = [f for ok, f in hits if ok]
-        what = f"experience within {cond.years} years of {anchor.isoformat()}" + (f", >= {min_units:g} items" if min_units else "")
+        what = f"experience within {cond.years} years of {anchor.strftime('%-d %b %Y')}" + (f", at least {min_units:g} items" if min_units else "")
         if not ok_facts:
             return _settle(False, known[0], ctx, params, what, proof)
         f = next((x for x in ok_facts if x.value.get("reference_letter") or x.evidence_status == "document_on_file"),
@@ -180,7 +185,7 @@ def evaluate(cond: Condition, facts: list[Fact], ctx: Context, *, category: str 
         if not regions:
             return RuleResult(UNKNOWN, "no delivery region in the notice", facts=[f.id], params=params)
         return _settle(len(covered) == len(regions), f, ctx, params,
-                       f"delivery regions {', '.join(regions)} vs {', '.join(f.value.get('itl', []))}", False)
+                       f"delivery regions {', '.join(regions)} {'covered' if len(covered) == len(regions) else 'not all covered'} by {f.label}", False)
 
     if cond.kind == "min_amount":
         bound = _resolve(cond.bound, ctx, params)
@@ -188,7 +193,8 @@ def evaluate(cond: Condition, facts: list[Fact], ctx: Context, *, category: str 
         amt = _num(f, cond.fact)
         if amt is None or not isinstance(bound, (int, float)):
             return RuleResult(UNKNOWN, f"amount not available for {f.label}", facts=[f.id], params=params)
-        return _settle(amt >= bound, f, ctx, params, f"{f.label} {amt:,.0f} >= {bound:,.0f}", proof)
+        return _settle(amt >= bound, f, ctx, params,
+                       f"{f.label} £{amt:,.0f} {'meets' if amt >= bound else 'is below'} the required £{bound:,.0f}", proof)
 
     f = next((x for x in known if x.evidence_status == "document_on_file"), known[0])
     return _settle(True, f, ctx, params, f"{f.label} held", proof)

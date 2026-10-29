@@ -83,9 +83,15 @@ class AnthropicLLM:
         import anthropic
 
         self.anthropic = anthropic
-        if client is None and not settings.anthropic_api_key:
-            raise LLMError("ANTHROPIC_API_KEY is not set (add it to .env)")
-        self.client = client or anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=4)
+        self._client = client
+
+    @property
+    def client(self):
+        if self._client is None:
+            if not settings.anthropic_api_key:
+                raise LLMError("ANTHROPIC_API_KEY is not set (add it to .env)")
+            self._client = self.anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=4)
+        return self._client
 
     def _create(self, **kw):
         start = time.monotonic()

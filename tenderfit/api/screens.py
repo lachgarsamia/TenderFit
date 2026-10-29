@@ -45,15 +45,17 @@ def _fit(conn, lot_ids: list[int], profile_id: int, profile: dict) -> dict[int, 
                 el.get("state"), "relevant")
             if (a["dimensions"] or {}).get("relevance", {}).get("level") == "low":
                 kind = "low"
-            out[lid] = {"assessed": True, "kind": kind, "label": a["recommendation"], "provisional": a["provisional"],
+            head, _, rest = (a["recommendation"] or "").partition(":")
+            out[lid] = {"assessed": True, "kind": kind, "label": head, "detail": rest.strip(), "provisional": a["provisional"],
                         "coverage": a["coverage"]}
             continue
         lf = next((x for x in lots[lid]["f"].get("lots", []) if x["id"] == lots[lid]["lot_no"]), {})
         rel = agg.relevance(lf.get("cpv") or lots[lid]["cpv_codes"], profile["cpv"], lf.get("regions") or lots[lid]["regions"],
                             profile["regions"])
         out[lid] = {"assessed": False, "kind": "low" if rel["level"] == "low" else "unassessed",
-                    "label": {"strong": "Likely relevant · not assessed yet", "partial": "Possibly relevant · not assessed yet",
-                              "low": "Low relevance"}[rel["level"]] + f" ({rel['detail']})", "provisional": None, "coverage": None}
+                    "label": {"strong": "Likely relevant", "partial": "Possibly relevant", "low": "Low relevance"}[rel["level"]],
+                    "detail": rel["detail"] + ("" if rel["level"] == "low" else " · not assessed yet"),
+                    "provisional": None, "coverage": None}
     return out
 
 
@@ -194,3 +196,13 @@ def evidence_impact(profile_id: int):
                  AND (f.evidence_status IN ('missing', 'unknown', 'needs_update') OR v.needs_human = 'G2')
                GROUP BY f.id ORDER BY count(*) DESC""", (profile_id,)).fetchall()
     return rows
+
+
+@router.get("/profiles/{profile_id}/pursued")
+def pursued(profile_id: int):
+    with connect() as conn:
+        return conn.execute(
+            """SELECT d.lot_id, d.created_at, l.lot_no, l.title AS lot_title, o.title, o.deadline, b.name AS buyer
+               FROM lot_decision d JOIN lot l ON l.id = d.lot_id JOIN opportunity o ON o.id = l.opportunity_id
+               LEFT JOIN buyer b ON b.id = o.buyer_id WHERE d.profile_id = %s AND d.decision = 'pursue'
+               ORDER BY o.deadline NULLS LAST""", (profile_id,)).fetchall()

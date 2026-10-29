@@ -70,6 +70,18 @@ def get_assessment(lot_id: int, profile_id: int):
                WHERE v.assessment_id = %s ORDER BY (r.obligation = 'mandatory') DESC, v.id""", (a["id"],)).fetchall()
         decision = conn.execute("SELECT decision, decided_by, created_at FROM lot_decision WHERE lot_id = %s AND profile_id = %s",
                                 (lot_id, profile_id)).fetchone()
+        steps: dict[int, list] = {}
+        for st in conn.execute("""SELECT requirement_id, tool, input FROM agent_step WHERE assessment_id = %s
+                                  ORDER BY requirement_id, step""", (a["id"],)):
+            steps.setdefault(st["requirement_id"], []).append({"tool": st["tool"], "input": st["input"]})
+        ver = conn.execute(
+            """SELECT nv.release_id, nv.source_url, nv.notice_type, nv.published_at, nvn.version_no,
+                      (SELECT count(*) FROM notice_version x WHERE x.ocid = nv.ocid) AS versions
+               FROM notice_version nv JOIN notice_version_numbered nvn ON nvn.id = nv.id WHERE nv.id = %s""",
+            (a["version_id"],)).fetchone()
+        profile = conn.execute("SELECT name, is_fictional FROM business_profile WHERE id = %s", (profile_id,)).fetchone()
+        fictional = conn.execute("SELECT ocid LIKE 'ocds-test-%%' f FROM opportunity WHERE id = %s",
+                                 (lot["opportunity_id"],)).fetchone()["f"]
     status = effective_status(lot["opp_status"], lot["status_reason"], lot["deadline"], lot["last_checked_at"],
                               datetime.now(timezone.utc))
     return {
@@ -81,7 +93,8 @@ def get_assessment(lot_id: int, profile_id: int):
         "recommendation": a["recommendation"], "dimensions": a["dimensions"], "coverage": a["coverage"],
         "provisional": a["provisional"], "mode": a["mode"], "cost_usd": float(a["cost_usd"]),
         "budget_reached": a["budget_reached"], "created_at": a["created_at"], "decision": decision,
-        "requirements": verdicts,
+        "version": ver, "profile": profile, "fictional_notice": fictional,
+        "requirements": [{**v, "agent_steps": steps.get(v["requirement_id"], [])} for v in verdicts],
     }
 
 
@@ -240,6 +253,18 @@ def job(job_id: int):
     return j
 
 
+def _snippet(old: str, new: str, context: int = 4) -> tuple[str, str]:
+    import difflib
+    a, b = old.split(), new.split()
+    ops = [o for o in difflib.SequenceMatcher(None, a, b).get_opcodes() if o[0] != "equal"]
+    if not ops:
+        return "", ""
+    i1, j1 = max(ops[0][1] - context, 0), max(ops[0][3] - context, 0)
+    i2, j2 = min(ops[-1][2] + context, len(a)), min(ops[-1][4] + context, len(b))
+    return (("… " if i1 else "") + " ".join(a[i1:i2]) + (" …" if i2 < len(a) else ""),
+            ("… " if j1 else "") + " ".join(b[j1:j2]) + (" …" if j2 < len(b) else ""))
+
+
 @router.get("/changes")
 def changes(profile_id: int | None = None, limit: int = 50):
     with connect() as conn:
@@ -256,6 +281,12 @@ def changes(profile_id: int | None = None, limit: int = 50):
                LEFT JOIN assessment ab ON ab.id = i.before_assessment_id LEFT JOIN assessment aa ON aa.id = i.after_assessment_id
                WHERE i.change_id = ANY(%s) AND (%s::bigint IS NULL OR i.profile_id = %s) ORDER BY i.id""",
             ([e["id"] for e in events], profile_id, profile_id)).fetchall()
+        ids = {x for e in events for p in e["passages"] for x in (p.get("old_id"), p.get("new_id")) if x}
+        texts = {r["id"]: r["text"] for r in conn.execute("SELECT id, text FROM passage WHERE id = ANY(%s)", (list(ids),))}
+    for e in events:
+        for p in e["passages"]:
+            before, after = texts.get(p.get("old_id"), ""), texts.get(p.get("new_id"), "")
+            p["before"], p["after"] = _snippet(before, after) if p["kind"] == "modified" else (before[:160], after[:160])
     by_change: dict[int, list] = {}
     for i in impacts:
         by_change.setdefault(i["change_id"], []).append(i)

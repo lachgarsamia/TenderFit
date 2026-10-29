@@ -20,6 +20,18 @@ docker compose up -d db
 .venv/bin/python -m tenderfit.jobs.worker
 ```
 
+Web app (screens from the design, Figs. 2 and 9–13):
+
+```
+cd web && npm install && npm run dev      # http://localhost:5173, proxies /api to :8000
+```
+
+`scripts/demo_seed.py` loads the fictional Northfield running example with scripted model responses, so the
+screens can be explored without an API key; those records are labelled fictional in the UI.
+
+Evaluation: `python -m tenderfit.eval run eval/datasets/<name> --configs B1,B2,B3,B4,B4-full [--live]`
+(see `eval/datasets/README.md`).
+
 Scripts: `scripts/gate_r0.sh` (import replay gate), `scripts/replay_check.py`, `scripts/source_study.py fetch|report`.
 
 ## Test

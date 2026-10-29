@@ -21,3 +21,4 @@ docs/*.pdf
 eval/work/
 eval/recordings/
 eval/reports/
+web/dist/
