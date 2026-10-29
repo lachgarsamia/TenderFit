@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     llm_effort: str = "medium"
     llm_record_path: str | None = None
     lot_cost_cap_usd: float = 0.50
+    lot_token_cap: int = 400_000
+    lot_time_cap_s: float = 180
+    agent_enabled: bool = True
+    agent_max_tool_calls: int = 8
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 

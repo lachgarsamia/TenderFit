@@ -42,6 +42,9 @@ class Decision:
     needs_human: str | None = None
     escalate: list[str] = field(default_factory=list)
     cost: float = 0.0
+    tokens: int = 0
+    documents: list[int] = field(default_factory=list)
+    recorded_by: str = "verdict"
 
 
 def load_facts(conn: psycopg.Connection, profile_id: int, lot_id: int) -> list[Fact]:
@@ -157,7 +160,7 @@ def decide(conn: psycopg.Connection, version_id: int, req: dict, facts: list[Fac
         passages[src["id"]] = dict(src)
     key = _cache_key(version_id, req, rel, ctx, sorted(passages) + answers)
     cached = conn.execute("SELECT result FROM verdict_cache WHERE key = %s", (key,)).fetchone()
-    cost = 0.0
+    cost, tokens = 0.0, 0
     if cached:
         raw = cached["result"]
     else:
@@ -171,11 +174,11 @@ def decide(conn: psycopg.Connection, version_id: int, req: dict, facts: list[Fac
         except LLMError as e:
             return Decision(UNKNOWN, f"model unavailable ({e}); not guessed", "guard",
                             citations=[(req["passage_id"], req["quote"])], escalate=escalate + ["model error"])
-        raw, cost = res.data, res.usage.cost_usd
+        raw, cost, tokens = res.data, res.usage.cost_usd, res.usage.input_tokens + res.usage.output_tokens
         log_call(conn, "verdict", VERDICT_VERSION, res.usage, {"version_id": version_id, "requirement_id": req["id"]})
         conn.execute("INSERT INTO verdict_cache (key, result) VALUES (%s, %s) ON CONFLICT DO NOTHING", (key, Jsonb(raw)))
     d = guard(raw, rel, ctx, req, passages)
-    d.cost = cost
+    d.cost, d.tokens = cost, tokens
     d.escalate = escalate + d.escalate + (["model verdict unknown"] if d.status == UNKNOWN else [])
     if (req["passage_id"], req["quote"]) not in d.citations:
         d.citations.insert(0, (req["passage_id"], req["quote"]))
@@ -221,7 +224,7 @@ def _carry_verdict(conn: psycopg.Connection, aid: int, req: dict, old_vid: int, 
 def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM, today: date | None = None,
                http=None, emb: Embedder | None = None, rr: Reranker | None = None, mode: str = "full",
                reason: str | None = None, version_id: int | None = None, carry: dict[int, int] | None = None,
-               pmap: dict[int, int] | None = None, shadow: bool = False) -> int:
+               pmap: dict[int, int] | None = None, shadow: bool = False, agent: bool | None = None) -> int:
     """carry maps requirement ids of this version to verdict ids to copy unchanged (targeted reassessment)."""
     today = today or datetime.now(LONDON).date()
     lot, ctx = lot_context(conn, lot_id, today)
@@ -245,7 +248,10 @@ def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM,
     reqs = conn.execute(
         """SELECT * FROM requirement WHERE version_id = %s AND (lot_no IS NULL OR lot_no = %s) ORDER BY id""",
         (version_id, lot["lot_no"])).fetchall()
-    spent, calls, budget_hit, vs = 0.0, 0, False, []
+    from tenderfit.agent.loop import Budget, run_agent
+
+    budget, calls, budget_hit, vs = Budget(), 0, False, []
+    use_agent = settings.agent_enabled if agent is None else agent
     overridden = overrides(conn, profile_id)
     for req in reqs:
         if req["id"] in carry:
@@ -257,9 +263,22 @@ def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM,
                             NEEDS if old["status"] == NOT_MET and _overridden(req, overridden) else old["status"],
                             old["reason"], _source_label(conn, req), old["question"], old["basis"]))
             continue
-        d = decide(conn, version_id, req, facts, ctx, llm, settings.lot_cost_cap_usd - spent, emb, rr)
-        spent += d.cost
+        d = decide(conn, version_id, req, facts, ctx, llm, budget.left, emb, rr)
+        budget.spend(d.cost, d.tokens)
         calls += d.cost > 0
+        rule_settled = d.decided_by == "rule" and d.status != UNKNOWN
+        if d.escalate and use_agent and d.decided_by != "budget" and not rule_settled:
+            b2 = d
+            d, tools = run_agent(conn, aid, version_id, req, facts, ctx, llm, budget, b2.reason, b2.escalate, emb, rr)
+            if d.decided_by == "budget" or d.reason.startswith("agent unavailable"):
+                b2.escalate.append(f"agent stopped: {d.reason}")
+                b2.reason += " (agent investigation stopped: budget reached)" if d.decided_by == "budget" else ""
+                b2.reads += [p for p in d.reads if p not in b2.reads]
+                d, b2.recorded_by = b2, "agent_trace"
+            else:
+                d.escalate = b2.escalate + d.escalate
+                d.params = d.params or b2.params
+            d.recorded_by, d.documents = "agent_trace", sorted(tools.read_docs)
         budget_hit |= d.decided_by == "budget"
         vid = conn.execute(
             """INSERT INTO verdict (assessment_id, requirement_id, status, reason, basis, needs_human, provisional,
@@ -277,7 +296,10 @@ def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM,
         for pid in d.reads:
             if pid != req["passage_id"]:
                 conn.execute("""INSERT INTO dependency (requirement_id, version_id, kind, target_type, target_id, recorded_by, verdict_id)
-                                VALUES (%s, %s, 'read', 'passage', %s, 'verdict', %s)""", (req["id"], version_id, str(pid), vid))
+                                VALUES (%s, %s, 'read', 'passage', %s, %s, %s)""", (req["id"], version_id, str(pid), d.recorded_by, vid))
+        for doc_ref in d.documents:
+            conn.execute("""INSERT INTO dependency (requirement_id, version_id, kind, target_type, target_id, recorded_by, verdict_id)
+                            VALUES (%s, %s, 'read', 'document', %s, %s, %s)""", (req["id"], version_id, str(doc_ref), d.recorded_by, vid))
         if d.question:
             conn.execute("INSERT INTO question (verdict_id, requirement_id, text) VALUES (%s, %s, %s)",
                          (vid, req["id"], d.question))
@@ -296,6 +318,6 @@ def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM,
     conn.execute(
         """UPDATE assessment SET recommendation = %s, dimensions = %s, provisional = %s, status = 'done', cost_usd = %s,
                   model_calls = %s, budget_reached = %s, finished_at = now() WHERE id = %s""",
-        (dims.recommendation, Jsonb(dims.__dict__), dims.provisional, spent, calls, budget_hit, aid))
+        (dims.recommendation, Jsonb(dims.__dict__), dims.provisional, budget.cost, calls, budget_hit, aid))
     conn.commit()
     return aid
