@@ -118,7 +118,7 @@ def guard(raw: dict, facts: list[Fact], ctx: Context, req: dict, passages: dict[
     if status in (NEEDS, UNKNOWN) and raw.get("conflict"):
         needs_human = needs_human or "G5"
     used = supporting + contrary
-    return Decision(status, reason, decided_by, basis, [f.id for f in used], citations, list(passages), [],
+    return Decision(status, reason, decided_by, basis, [f.id for f in used], citations, [pid for pid, _ in citations], [],
                     raw.get("question"), needs_human, escalate)
 
 
@@ -195,22 +195,51 @@ def _source_label(conn: psycopg.Connection, req: dict) -> str:
     return " · ".join(parts)
 
 
+def _overridden(req: dict, overridden: dict) -> dict | None:
+    return overridden.get(req["id"]) or (overridden.get(req["carried_from"]) if req.get("carried_from") else None)
+
+
+def _carry_verdict(conn: psycopg.Connection, aid: int, req: dict, old_vid: int, pmap: dict[int, int],
+                   provisional: bool) -> dict:
+    old = conn.execute("SELECT * FROM verdict WHERE id = %s", (old_vid,)).fetchone()
+    vid = conn.execute(
+        """INSERT INTO verdict (assessment_id, requirement_id, status, reason, basis, needs_human, provisional, question,
+                                escalate, escalate_reason, decided_by, carried_over)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true) RETURNING id""",
+        (aid, req["id"], old["status"], old["reason"], old["basis"], old["needs_human"], provisional, old["question"],
+         old["escalate"], old["escalate_reason"], old["decided_by"])).fetchone()["id"]
+    for c in conn.execute("SELECT passage_id, quote FROM verdict_citation WHERE verdict_id = %s", (old_vid,)).fetchall():
+        conn.execute("INSERT INTO verdict_citation (verdict_id, passage_id, quote) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                     (vid, pmap.get(c["passage_id"], c["passage_id"]), c["quote"]))
+    for f in conn.execute("SELECT fact_id FROM verdict_fact WHERE verdict_id = %s", (old_vid,)).fetchall():
+        conn.execute("INSERT INTO verdict_fact (verdict_id, fact_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (vid, f["fact_id"]))
+    if old["question"]:
+        conn.execute("INSERT INTO question (verdict_id, requirement_id, text) VALUES (%s, %s, %s)", (vid, req["id"], old["question"]))
+    return {**old, "id": vid}
+
+
 def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM, today: date | None = None,
                http=None, emb: Embedder | None = None, rr: Reranker | None = None, mode: str = "full",
-               reason: str | None = None) -> int:
+               reason: str | None = None, version_id: int | None = None, carry: dict[int, int] | None = None,
+               pmap: dict[int, int] | None = None, shadow: bool = False) -> int:
+    """carry maps requirement ids of this version to verdict ids to copy unchanged (targeted reassessment)."""
     today = today or datetime.now(LONDON).date()
     lot, ctx = lot_context(conn, lot_id, today)
-    version_id = lot["current_version_id"]
+    version_id = version_id or lot["current_version_id"]
     docs.process_version(conn, version_id, http)
     index_version(conn, version_id, emb)
     extract_version(conn, version_id, llm)
     inv = docs.inventory(conn, version_id)
-    conn.execute("UPDATE assessment SET superseded = true WHERE lot_id = %s AND profile_id = %s AND NOT superseded",
-                 (lot_id, profile_id))
+    if not shadow:
+        conn.execute("UPDATE assessment SET superseded = true WHERE lot_id = %s AND profile_id = %s AND NOT superseded",
+                     (lot_id, profile_id))
     aid = conn.execute(
-        """INSERT INTO assessment (profile_id, lot_id, version_id, coverage, provisional, mode, full_reason, status)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, 'running') RETURNING id""",
-        (profile_id, lot_id, version_id, inv["coverage"], inv["coverage"] != "complete", mode, reason)).fetchone()["id"]
+        """INSERT INTO assessment (profile_id, lot_id, version_id, coverage, provisional, mode, full_reason, status,
+                                   shadow, superseded)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, 'running', %s, %s) RETURNING id""",
+        (profile_id, lot_id, version_id, inv["coverage"], inv["coverage"] != "complete", mode, reason, shadow,
+         shadow)).fetchone()["id"]
+    carry, pmap = carry or {}, pmap or {}
     conn.commit()
     facts = load_facts(conn, profile_id, lot_id)
     reqs = conn.execute(
@@ -219,6 +248,15 @@ def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM,
     spent, calls, budget_hit, vs = 0.0, 0, False, []
     overridden = overrides(conn, profile_id)
     for req in reqs:
+        if req["id"] in carry:
+            old = _carry_verdict(conn, aid, req, carry[req["id"]], pmap, inv["coverage"] != "complete")
+            for fid in [r["fact_id"] for r in conn.execute("SELECT fact_id FROM verdict_fact WHERE verdict_id = %s", (old["id"],))]:
+                conn.execute("""INSERT INTO dependency (requirement_id, version_id, kind, target_type, target_id, recorded_by, verdict_id)
+                                VALUES (%s, %s, 'fact', 'fact', %s, 'verdict', %s)""", (req["id"], version_id, str(fid), old["id"]))
+            vs.append(agg.V(req["id"], req["statement"], req["obligation"], req["category"],
+                            NEEDS if old["status"] == NOT_MET and _overridden(req, overridden) else old["status"],
+                            old["reason"], _source_label(conn, req), old["question"], old["basis"]))
+            continue
         d = decide(conn, version_id, req, facts, ctx, llm, settings.lot_cost_cap_usd - spent, emb, rr)
         spent += d.cost
         calls += d.cost > 0
@@ -244,8 +282,7 @@ def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM,
             conn.execute("INSERT INTO question (verdict_id, requirement_id, text) VALUES (%s, %s, %s)",
                          (vid, req["id"], d.question))
         status = d.status
-        if d.status == NOT_MET and req["id"] in overridden:
-            o = overridden[req["id"]]
+        if d.status == NOT_MET and (o := _overridden(req, overridden)):
             status = NEEDS
             conn.execute("UPDATE verdict SET override_status = %s, override_reason = %s, override_by = %s WHERE id = %s",
                          (NEEDS, o["reason"], o["user_name"], vid))

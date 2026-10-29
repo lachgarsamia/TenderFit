@@ -31,6 +31,12 @@
   RRF (k=60); top 20 reranked by cross-encoder/ms-marco-MiniLM-L-6-v2. Model weights are copied into RAM after
   loading: torch 2.15 on macOS returned NaN from matmuls on memory-mapped safetensors (the cross-encoder scored NaN).
 
+- B2 records a `read` dependency only for passages its verdict cites (after quote verification), not every
+  retrieved passage; otherwise on short documents every amendment reopens almost every requirement. The agent
+  (R2) records every passage its tools return, as Table 18 says.
+- Uploads and "buyer issued none" confirmations carry to the next notice version when the document label is
+  unchanged, so an amendment does not look like "essential document removed".
+
 ## Live API findings (probed 2026-10-29, window 2026-10-27)
 - No key, no auth. ~0.5s per 100-release page, but sustained paging gets throttled: 2-3 responses of 429/503 per
   56 pages in the two-week import, all recovered via Retry-After. A two-week backfill takes 4-7 minutes.

@@ -77,11 +77,14 @@ def _passages(conn: psycopg.Connection, version_id: int) -> list[dict]:
            WHERE d.version_id = %s AND d.access = 'read' ORDER BY d.id, p.ordinal""", (version_id,)).fetchall()
 
 
-def extract_version(conn: psycopg.Connection, version_id: int, llm: LLM, force: bool = False) -> dict:
-    if not force and conn.execute("SELECT 1 FROM requirement WHERE version_id = %s LIMIT 1", (version_id,)).fetchone():
+def extract_version(conn: psycopg.Connection, version_id: int, llm: LLM, force: bool = False,
+                    only: set[int] | None = None) -> dict:
+    if only is None and not force and conn.execute(
+            "SELECT 1 FROM requirement WHERE version_id = %s LIMIT 1", (version_id,)).fetchone():
         return {"cached": True}
     passages = _passages(conn, version_id)
     by_id = {p["id"]: p for p in passages}
+    targets = [p for p in passages if only is None or p["id"] in only]
     lots = {r["lot_no"]: r["id"] for r in conn.execute(
         """SELECT l.lot_no, l.id FROM lot l JOIN notice_version nv ON nv.opportunity_id = l.opportunity_id
            WHERE nv.id = %s""", (version_id,))}
@@ -99,7 +102,8 @@ def extract_version(conn: psycopg.Connection, version_id: int, llm: LLM, force: 
 
     stats = {"accepted": 0, "rejected": 0, "duplicates": 0, "calls": 0, "cost_usd": 0.0}
     seen: set[tuple] = set()
-    for batch in _batches(passages):
+    stats["ids"] = []
+    for batch in _batches(targets):
         try:
             res = llm.json("extract", EXTRACT_SYSTEM, extract_user(batch, sorted(lots)), EXTRACTION_SCHEMA)
         except LLMError:
@@ -142,5 +146,6 @@ def extract_version(conn: psycopg.Connection, version_id: int, llm: LLM, force: 
             ).fetchone()["id"]
             _record_dependencies(conn, req_id, version_id, req, p, sections, refs_by_label, definitions)
             stats["accepted"] += 1
+            stats["ids"].append(req_id)
     conn.commit()
     return stats

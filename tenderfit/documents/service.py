@@ -115,6 +115,50 @@ def _add_referenced(conn: psycopg.Connection, version_id: int, doc_id: int, item
             names += " " + low
 
 
+def inherit_from_previous(conn: psycopg.Connection, version_id: int) -> int:
+    """User uploads and 'buyer issued none' confirmations carry to the next version of the same notice."""
+    prev = conn.execute(
+        """SELECT p.id FROM notice_version v JOIN notice_version p ON p.ocid = v.ocid
+           WHERE v.id = %s AND (p.published_at, p.release_id) < (v.published_at, v.release_id)
+           ORDER BY p.published_at DESC, p.release_id DESC LIMIT 1""", (version_id,)).fetchone()
+    if not prev:
+        return 0
+    n = 0
+    old = conn.execute("""SELECT r.*, d.origin FROM document_ref r LEFT JOIN document d ON d.id = r.document_id
+                          WHERE r.version_id = %s AND (d.origin = 'upload' OR r.status = 'confirmed_none')""",
+                       (prev["id"],)).fetchall()
+    for o in old:
+        cur = conn.execute("""SELECT * FROM document_ref WHERE version_id = %s AND lower(label) = lower(%s)
+                              AND kind = %s AND status = 'not_retrieved'""", (version_id, o["label"], o["kind"])).fetchone()
+        if o["kind"] == "referenced" and not cur:
+            continue
+        if o["status"] == "confirmed_none":
+            if cur:
+                conn.execute("UPDATE document_ref SET status = 'confirmed_none', note = %s WHERE id = %s",
+                             (f"{o['note']} (carried from previous version)", cur["id"]))
+                n += 1
+            continue
+        doc = conn.execute(
+            """INSERT INTO document (version_id, url, sha256, origin, access, retrieved_at, filename, content_type, page_count,
+                                     note, storage_path, uploaded_by)
+               SELECT %s, url, sha256, origin, access, retrieved_at, filename, content_type, page_count,
+                      'carried from previous version', storage_path, uploaded_by FROM document WHERE id = %s RETURNING id""",
+            (version_id, o["document_id"])).fetchone()["id"]
+        conn.execute("""INSERT INTO passage (document_id, ordinal, page, section, text, sha256, kind, embedding)
+                        SELECT %s, ordinal, page, section, text, sha256, kind, embedding FROM passage WHERE document_id = %s""",
+                     (doc, o["document_id"]))
+        if cur:
+            conn.execute("UPDATE document_ref SET status = %s, document_id = %s, note = 'uploaded earlier; carried over' WHERE id = %s",
+                         (o["status"], doc, cur["id"]))
+        else:
+            conn.execute(
+                """INSERT INTO document_ref (version_id, label, ocds_type, kind, status, document_id, essential, referenced_in, note)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'uploaded earlier; carried over')""",
+                (version_id, o["label"], o["ocds_type"], o["kind"], o["status"], doc, o["essential"], o["referenced_in"]))
+        n += 1
+    return n
+
+
 def process_version(conn: psycopg.Connection, version_id: int, http: httpx.Client | None = None) -> dict:
     ensure_inventory(conn, version_id)
     out = {"read": 0, "unreadable": 0, "not_retrieved": 0}
@@ -134,6 +178,9 @@ def process_version(conn: psycopg.Connection, version_id: int, http: httpx.Clien
         out[status] += 1
         conn.execute("UPDATE document_ref SET status = %s, document_id = %s, note = %s WHERE id = %s",
                      (status, doc_id, note, r["id"]))
+    if not conn.execute("SELECT 1 FROM document WHERE version_id = %s AND note = 'carried from previous version' LIMIT 1",
+                        (version_id,)).fetchone():
+        out["inherited"] = inherit_from_previous(conn, version_id)
     conn.commit()
     return out
 
