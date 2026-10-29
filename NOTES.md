@@ -17,6 +17,16 @@
 - Buyer name comes from that buyer's most recent notice, for the same reason.
 - Shortlist (`open_only`) includes `unverified`, as Table 20 says ("yes, with a warning").
 
+- Fresh declared capacity can make a quantity check MET "on declared facts" (Fig. 10). A delivery-window check
+  (lead time vs current workload) needs per-lot confirmation (G3) before MET, as in the spec's check_delivery.
+  Freshness is measured against today, not the deadline.
+- A fact that contradicts a requirement gives NOT MET only if it is current; a stale contrary fact gives
+  NEEDS CONFIRMATION (G4). Missing or unknown evidence always gives UNKNOWN.
+- Recommendation order follows 4.5, except low relevance overrides "provisional"/"needs confirmation" (never
+  "relevant" for an irrelevant lot); a blocker still wins.
+- Find a Tender notice pages and attachments return 403 to non-browser clients. These documents are marked
+  not retrieved ("source refused automated access") and go through upload; no bypass is attempted.
+
 ## Live API findings (probed 2026-10-29, window 2026-10-27)
 - No key, no auth. ~0.5s per 100-release page, but sustained paging gets throttled: 2-3 responses of 429/503 per
   56 pages in the two-week import, all recovered via Retry-After. A two-week backfill takes 4-7 minutes.

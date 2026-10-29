@@ -23,10 +23,12 @@ def test_insurance_ending_before_contract_start_asks_question():
     assert v.usable and v.stale and "renewed" in v.question
 
 
-def test_capacity_confirm_by_is_30_days_and_flags_before_deadline():
+def test_capacity_confirm_by_is_30_days_and_goes_stale_after_it():
     assert default_confirm_by("capacity", date(2026, 10, 2)) == date(2026, 11, 1)
-    v = check(fact("capacity", "declared", confirm_by=date(2026, 11, 1)), today=TODAY, deadline=DEADLINE)
-    assert v.usable and v.stale
+    f = fact("capacity", "declared", confirm_by=date(2026, 11, 1))
+    assert check(f, today=TODAY, deadline=DEADLINE).usable
+    late = check(f, today=date(2026, 11, 2), deadline=DEADLINE)
+    assert not late.usable and late.stale
 
 
 def test_expired_fact_is_never_usable():

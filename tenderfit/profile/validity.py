@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-TIME_SENSITIVE = {"capacity", "workload", "staff", "installation_slots"}
 DECLARED_YEARLY = {"region", "product", "registration", "service"}
 CONFIRM_DAYS = {"capacity": 30, "workload": 30, "staff": 30, "installation_slots": 30}
 RECONFIRM_DAYS = 365
@@ -63,6 +62,4 @@ def check(f: FactView, *, today: date, deadline: date | None, contract_start: da
             and f.valid_until < contract_start):
         return Validity(True, True, f"policy ends {f.valid_until.isoformat()}, before contract start",
                         "Will the policy be renewed before the contract starts?")
-    if f.confirm_by and f.confirm_by < at and f.attribute in TIME_SENSITIVE:
-        return Validity(True, True, f"confirmation due {f.confirm_by.isoformat()}, before the deadline")
     return Validity(True, False, None)
