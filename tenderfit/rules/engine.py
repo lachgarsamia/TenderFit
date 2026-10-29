@@ -32,6 +32,7 @@ class Fact:
     confirm_by: date | None = None
     confirmed_at: date | None = None
     confirmed_for_lot: bool = False
+    declaration_confirmed: bool = False
 
     def view(self) -> FactView:
         return FactView(self.attribute, self.evidence_status, self.valid_until, self.confirm_by, self.confirmed_at)
@@ -100,6 +101,9 @@ def _settle(ok: bool, fact: Fact, ctx: Context, params: list[str], what: str, pr
     if v.stale:
         return RuleResult(NEEDS, f"{what}: {v.reason}", facts=[fact.id], params=params, question=v.question,
                           needs_human="G4")
+    if proof_needed and fact.evidence_status == "declared" and fact.declaration_confirmed:
+        return RuleResult(MET, f"{what} (on declared facts, declaration confirmed for this lot)", basis="declared",
+                          facts=[fact.id], params=params)
     if proof_needed and fact.evidence_status == "declared":
         return RuleResult(NEEDS, f"{what} on declared facts; proof is required", basis="declared", facts=[fact.id],
                           params=params, question=f"Upload evidence for '{fact.label}' or confirm the declaration.",
@@ -161,7 +165,8 @@ def evaluate(cond: Condition, facts: list[Fact], ctx: Context, *, category: str 
             return _settle(False, known[0], ctx, params, what, proof)
         f = next((x for x in ok_facts if x.value.get("reference_letter") or x.evidence_status == "document_on_file"),
                  ok_facts[0])
-        needs_ref = proof and not (f.value.get("reference_letter") or f.evidence_status == "document_on_file")
+        needs_ref = proof and not (f.value.get("reference_letter") or f.evidence_status == "document_on_file"
+                                   or f.declaration_confirmed)
         if needs_ref:
             return RuleResult(NEEDS, f"{what}: {f.label} qualifies but no reference on file", basis="declared",
                               facts=[f.id], params=params, question="Can you provide a customer reference for this contract?",

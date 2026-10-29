@@ -18,6 +18,9 @@ SPEC_V1 = {
          "remove all packaging from site.")],
 }
 
+SPEC_V2 = {**SPEC_V1, 6: [("3.2 Delivery", "The supplier shall deliver all desks within 45 days of order. Delivery shall be made "
+                          "between 08:00 and 16:00 on Working Days as defined in Appendix B.")]}
+
 
 def pdf(pages: dict[int, list[tuple[str, str]]], last_page: int | None = None) -> bytes:
     doc = pymupdf.open()
