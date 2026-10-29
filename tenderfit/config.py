@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     import_chunk_hours: int = 24
     status_fresh_hours: float = 24
     http_max_retries: int = 8
+    document_dir: str = "data/documents"
 
 
 settings = Settings()

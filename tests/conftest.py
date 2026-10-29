@@ -25,6 +25,6 @@ def _test_db():
 @pytest.fixture
 def db(_test_db):
     with connect(_test_db) as c:
-        c.execute("TRUNCATE raw_release, buyer, opportunity, notice_version, lot, linked_notice, import_state, import_run, job RESTART IDENTITY CASCADE")
+        c.execute("TRUNCATE passage, document_ref, document, raw_release, buyer, opportunity, notice_version, lot, linked_notice, import_state, import_run, job RESTART IDENTITY CASCADE")
         c.commit()
         yield c
