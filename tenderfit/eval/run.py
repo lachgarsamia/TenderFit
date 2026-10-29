@@ -294,7 +294,19 @@ def main() -> None:
     r.add_argument("--configs", default="B1,B2,B3,B4,B4-full")
     r.add_argument("--live", action="store_true", help="call the model for requests not yet recorded")
     r.add_argument("--today", type=date.fromisoformat, default=None)
+    k = sub.add_parser("kappa", help="Cohen's kappa between two annotators' gold files")
+    k.add_argument("a", type=Path)
+    k.add_argument("b", type=Path)
     a = p.parse_args()
+    if a.cmd == "kappa":
+        def labels(path):
+            g = json.loads(path.read_text())
+            return {(n["id"], r["id"], prof): v for n in g["notices"] for r in n["requirements"]
+                    for prof, v in r.get("verdicts", {}).items()}
+        la, lb = labels(a.a), labels(a.b)
+        keys = sorted(set(la) & set(lb))
+        print(f"verdict kappa {m.kappa([la[x] for x in keys], [lb[x] for x in keys]):.3f} over {len(keys)} labels")
+        return
     gold = json.loads((a.dataset / "gold.json").read_text())
     today = a.today or date.fromisoformat(gold.get("today", str(date.today())))
     results, summary = {}, {}
