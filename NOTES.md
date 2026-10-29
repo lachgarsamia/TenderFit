@@ -37,6 +37,17 @@
 - Uploads and "buyer issued none" confirmations carry to the next notice version when the document label is
   unchanged, so an amendment does not look like "essential document removed".
 
+- Agent runs only for escalated verdicts that a rule did not settle (rule 5: a deterministic MET/NOT MET is never
+  handed to the model). If it hits the tool-call limit or the lot's cost/token/time cap, the B2 verdict stands and
+  its reason says "budget reached"; it is never replaced by a guess. Its verdict goes through the same guard as B2.
+- open_attachment only opens documents already listed or referenced in the notice version; no tool takes a URL.
+- Targeted reassessment carries verdicts for requirements whose dependencies did not change; requirements whose
+  source passage was edited are re-extracted from the new passage and paired to the old one (token-set >= 70) for
+  the before/after explanation. Profile-side changes (fact edit, evidence, G4, daily expiry) use the same path.
+- Pursued lots (G1) get a background full reassessment after each targeted one; mandatory disagreements are stored
+  as missed dependencies on the change impact.
+- Tests pin B2 (agent off) unless marked `agent`, so B3 vs B2 is a setting (`AGENT_ENABLED`).
+
 ## Live API findings (probed 2026-10-29, window 2026-10-27)
 - No key, no auth. ~0.5s per 100-release page, but sustained paging gets throttled: 2-3 responses of 429/503 per
   56 pages in the two-week import, all recovered via Retry-After. A two-week backfill takes 4-7 minutes.
