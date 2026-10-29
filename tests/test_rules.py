@@ -96,6 +96,7 @@ def test_eligibility_order():
     assert eligibility([v(MET)], [NOTICE, SPEC, ITT])[0] == "provisional"
     assert eligibility([v(MET), v(NEEDS)], [NOTICE, SPEC])[0] == "needs_confirmation"
     assert eligibility([v(MET), v(UNKNOWN, "scored")], [NOTICE, SPEC])[0] == "no_blocker"
+    assert eligibility([], [NOTICE, SPEC])[0] == "not_assessed", "no requirements is never 'no blocker found'"
 
 
 def test_provisional_never_says_no_blocker_found():

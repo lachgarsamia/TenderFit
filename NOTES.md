@@ -48,6 +48,10 @@
   as missed dependencies on the change impact.
 - Tests pin B2 (agent off) unless marked `agent`, so B3 vs B2 is a setting (`AGENT_ENABLED`).
 
+- A lot with no extracted requirements is "not assessed" (never "no blocker found"), even when documents were read.
+- Requirements are extracted per document (`document.extracted_at`), so a document uploaded after a first
+  assessment is extracted on the next run.
+
 ## Live API findings (probed 2026-10-29, window 2026-10-27)
 - No key, no auth. ~0.5s per 100-release page, but sustained paging gets throttled: 2-3 responses of 429/503 per
   56 pages in the two-week import, all recovered via Retry-After. A two-week backfill takes 4-7 minutes.

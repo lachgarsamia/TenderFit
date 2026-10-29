@@ -28,7 +28,7 @@ def eligibility(verdicts: list[V], refs: list[Ref]) -> tuple[str, list]:
     blockers = [v for v in verdicts if v.obligation == "mandatory" and v.status == NOT_MET]
     if blockers:
         return "blocker_found", blockers
-    if not any(r.status == "read" for r in refs if r.kind != "notice"):
+    if not any(r.status == "read" for r in refs if r.kind != "notice") or not verdicts:
         return "not_assessed", []
     unread = [r for r in refs if r.essential and r.kind != "notice" and r.status not in ("read", "confirmed_none")]
     if unread:
@@ -72,7 +72,7 @@ def dimensions(verdicts: list[V], refs: list[Ref], rel: dict, coverage: str) -> 
     if elig == "blocker_found":
         label, detail = "Blocker found", "; ".join(f"{b.statement} ({b.source})" for b in items)
     elif elig == "not_assessed":
-        label, detail = "Not assessed", "tender documents unavailable"
+        label, detail = "Not assessed", ("tender documents unavailable" if verdicts else "no requirements found in the documents read")
     elif elig == "provisional":
         label, detail = "Provisional", f"no blocker in documents read ({read} of {len(docs)}); unread: " + \
             ", ".join(r.label for r in items)
@@ -95,7 +95,8 @@ def dimensions(verdicts: list[V], refs: list[Ref], rel: dict, coverage: str) -> 
     if elig == "blocker_found":
         rec = f"Blocker found: {items[0].statement} ({items[0].source})"
     elif elig == "not_assessed":
-        rec = "Not assessed beyond relevance: tender documents unavailable"
+        rec = "Not assessed beyond relevance: " + ("tender documents unavailable" if verdicts else
+                                                    "no requirements found in the documents read; check them yourself")
     elif rel["level"] == "low":
         rec = f"Low relevance: {rel['detail']}"
     elif elig == "provisional":

@@ -110,7 +110,23 @@ def main():
         v2["tender"]["tenderPeriod"]["endDate"] = "2026-11-27T12:00:00Z"
         run_import(c, importer(v2), now.replace(year=2026, month=10, day=1), now, now=now)
         process_pending(c, llm, http=portal(), agent=True)
-        print("demo loaded: Northfield University (fictional), lots", lots)
+        r = json.loads((D / "releases/v1.json").read_text())
+        r.update(ocid="ocds-test-riverside", id="030100-2026", date="2026-10-27T10:00:00Z",
+                 buyer={"id": "GB-TEST-RIVERSIDE", "name": "Riverside Borough Council"})
+        r["tender"].update(title="Civic Centre office furniture refresh", description="Office desks and storage.",
+                           tenderPeriod={"endDate": "2026-12-04T17:00:00Z"})
+        r["tender"]["lots"] = r["tender"]["lots"][:1]
+        r["tender"]["items"] = r["tender"]["items"][:1]
+        for d in r["tender"]["documents"]:
+            if d["documentType"] == "technicalSpecifications":
+                d["url"] = "https://portal.test/Spec_Desks_v2.pdf"
+            if d.get("noticeType"):
+                d["id"] = r["id"]
+        run_import(c, importer(r), now.replace(year=2026, month=10, day=1), now, now=now)
+        rlot = c.execute("""SELECT l.id FROM lot l JOIN opportunity o ON o.id = l.opportunity_id
+                            WHERE o.ocid = 'ocds-test-riverside'""").fetchone()["id"]
+        assess_lot(c, rlot, ids["Atlas Furniture"], llm, http=portal(), agent=False)
+        print("demo loaded (fictional): Northfield lots", lots, "Riverside lot", rlot)
 
 
 if __name__ == "__main__":
