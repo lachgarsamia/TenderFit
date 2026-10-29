@@ -79,12 +79,18 @@ def _passages(conn: psycopg.Connection, version_id: int) -> list[dict]:
 
 def extract_version(conn: psycopg.Connection, version_id: int, llm: LLM, force: bool = False,
                     only: set[int] | None = None) -> dict:
-    if only is None and not force and conn.execute(
-            "SELECT 1 FROM requirement WHERE version_id = %s LIMIT 1", (version_id,)).fetchone():
-        return {"cached": True}
     passages = _passages(conn, version_id)
     by_id = {p["id"]: p for p in passages}
-    targets = [p for p in passages if only is None or p["id"] in only]
+    if only is not None:
+        targets = [p for p in passages if p["id"] in only]
+    elif force:
+        targets = passages
+    else:
+        pending = {r["id"] for r in conn.execute(
+            "SELECT id FROM document WHERE version_id = %s AND access = 'read' AND extracted_at IS NULL", (version_id,))}
+        targets = [p for p in passages if p["document_id"] in pending]
+        if not targets:
+            return {"cached": True}
     lots = {r["lot_no"]: r["id"] for r in conn.execute(
         """SELECT l.lot_no, l.id FROM lot l JOIN notice_version nv ON nv.opportunity_id = l.opportunity_id
            WHERE nv.id = %s""", (version_id,))}
@@ -147,5 +153,8 @@ def extract_version(conn: psycopg.Connection, version_id: int, llm: LLM, force: 
             _record_dependencies(conn, req_id, version_id, req, p, sections, refs_by_label, definitions)
             stats["accepted"] += 1
             stats["ids"].append(req_id)
+    if only is None:
+        conn.execute("UPDATE document SET extracted_at = now() WHERE id = ANY(%s)",
+                     (list({p["document_id"] for p in targets}),))
     conn.commit()
     return stats

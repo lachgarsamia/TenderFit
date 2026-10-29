@@ -105,6 +105,7 @@ def carry_requirements(conn: psycopg.Connection, old_vid: int, new_vid: int, cha
     fresh = extract_version(conn, new_vid, llm, only=change.new_passage_ids) if change.new_passage_ids else {"ids": []}
     new_reqs = conn.execute("SELECT * FROM requirement WHERE id = ANY(%s)", (fresh.get("ids", []),)).fetchall()
     added, removed = pair_requirements(conn, displaced, new_reqs)
+    conn.execute("UPDATE document SET extracted_at = now() WHERE version_id = %s AND access = 'read'", (new_vid,))
     conn.commit()
     return {"prepared": True, "carried": len(mapping), "added": added, "removed": removed}
 

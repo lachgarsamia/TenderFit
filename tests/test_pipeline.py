@@ -153,3 +153,18 @@ def test_budget_reached_is_never_a_guess(db, tmp_path, monkeypatch):
     assert inst["decided_by"] == "budget" and inst["reason"].startswith("budget reached")
     assert inst["status"] in ("needs_confirmation", "unknown") and a["budget_reached"]
     assert vs["Deliver all desks within 30 days of order"]["status"] == "not_met"
+
+
+def test_document_uploaded_after_an_assessment_is_extracted(db, tmp_path, monkeypatch):
+    monkeypatch.setattr(service.settings, "document_dir", str(tmp_path))
+    ids = seed(db)
+    run_import(db, fake([northfield.release()]), T0, T1, now=NOW)
+    lots = {r["lot_no"]: r["id"] for r in db.execute("SELECT id, lot_no FROM lot")}
+    kw = dict(llm=ScriptedLLM(verdicts), today=TODAY, emb=BagEmbedder(), rr=OverlapReranker())
+    assess_lot(db, lots["2"], ids["Pennine Seating"], http=portal(northfield.pdf(northfield.SPEC_V1)), **kw)
+    vid = db.execute("SELECT current_version_id v FROM opportunity").fetchone()["v"]
+    itt = next(x for x in service.inventory(db, vid)["documents"] if x["label"] == "Instructions to Tenderers")
+    service.attach_upload(db, vid, "ITT.docx", northfield.itt_docx(), "sam", itt["id"])
+    a, vs = run(db, assess_lot(db, lots["1"], ids["Atlas Furniture"], **kw))
+    assert "Comparable contract (150+ items, last 3 years) with reference" in vs
+    assert db.execute("SELECT count(*) n FROM requirement WHERE statement LIKE 'Supply 200%%'").fetchone()["n"] == 1
