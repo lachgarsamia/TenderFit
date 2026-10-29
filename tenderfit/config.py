@@ -1,7 +1,10 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    anthropic_api_key: str | None = None
     database_url: str = "postgresql://tenderfit:tenderfit@localhost:5432/tenderfit"
     fts_base_url: str = "https://www.find-tender.service.gov.uk/api/1.0"
     import_interval_hours: float = 4
