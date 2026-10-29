@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     status_fresh_hours: float = 24
     http_max_retries: int = 8
     document_dir: str = "data/documents"
+    llm_model_extract: str = "claude-opus-5-5"
+    llm_model_agent: str = "claude-opus-5-5"
+    llm_effort: str = "medium"
+    llm_record_path: str | None = None
+    lot_cost_cap_usd: float = 0.50
 
 
 settings = Settings()
