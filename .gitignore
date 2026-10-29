@@ -17,3 +17,4 @@ pgdata/
 volumes/
 docs/*.pdf
 .DS_Store
+.claude/
