@@ -15,7 +15,7 @@ DATASET = Path("eval/datasets/northfield")
 
 
 def ask(messages):
-    call = ToolCall("t0", "raise_question", {"status": "unknown", "reason": "not enough evidence", "question": "Can you confirm?"})
+    call = ToolCall("t0", "raise_question", {"status": "unknown", "reason": "not enough evidence", "question": "Do you hold evidence for this requirement, such as a test report or certificate?"})
     return ToolTurn("", [call], [{"type": "tool_use", "id": "t0", "name": call.name, "input": call.input}],
                     Usage("claude-opus-5-5", 1500, 80), "tool_use")
 

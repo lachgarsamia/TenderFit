@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes } from "react-router-dom";
-import { api } from "./api";
+import { STATIC, SNAPSHOT_META, api, fmtDate } from "./api";
 import { Icon } from "./components/ui";
 import Assessment from "./pages/Assessment";
 import Changes from "./pages/Changes";
@@ -48,11 +48,15 @@ export default function App() {
               <select id="ws" value={profile?.id ?? ""} onChange={(e) => choose(Number(e.target.value))}>
                 {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
-              {profile?.is_fictional && <div className="fic">Fictional test profile. Tender notices are live data.</div>}
+              {profile?.is_fictional && <div className="fic">Fictional test profile. Tender notices are {STATIC ? "a dated snapshot of" : ""} live data{STATIC ? " from Find a Tender" : ""}.</div>}
             </div>
           )}
         </aside>
         <main className="main" id="main">
+          {STATIC && <div className="banner info" role="note"><span className="b-icon">i</span><div className="body">
+            <strong>Read-only demo</strong>
+            <p>Tender notices are real data from Find a Tender, captured {fmtDate(SNAPSHOT_META?.captured_at)}. The three companies and the two notices marked Demo are fictional, and the AI answers on those notices are scripted. Buttons that change data are switched off.</p>
+          </div></div>}
           {failed ? <div className="empty"><strong>TenderFit can't reach its server.</strong>Start the API on port 8000 and reload.</div> :
             !profile ? <div className="empty">Loading…</div> : (
             <Routes>

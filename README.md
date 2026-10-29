@@ -29,6 +29,10 @@ cd web && npm install && npm run dev      # http://localhost:5173, proxies /api 
 `scripts/demo_seed.py` loads the fictional Northfield running example with scripted model responses, so the
 screens can be explored without an API key; those records are labelled fictional in the UI.
 
+Read-only demo page (no server needed): `python scripts/demo_seed.py --reset`, then
+`python scripts/snapshot_demo.py` with the API running, then `python scripts/build_demo.py` (writes one
+self-contained HTML file to `web/dist-demo/`).
+
 Evaluation: `python -m tenderfit.eval run eval/datasets/<name> --configs B1,B2,B3,B4,B4-full [--live]`
 (see `eval/datasets/README.md`).
 

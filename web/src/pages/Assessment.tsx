@@ -115,7 +115,7 @@ export default function Assessment() {
           </div>}
         </div>
         {a && <div className="actions">
-          {a.version?.source_url && <a className="btn ghost" href={a.version.source_url} target="_blank" rel="noreferrer"><Icon name="external" size={16} />Source notice</a>}
+          {a.version?.source_url && !a.fictional_notice && <a className="btn ghost" href={a.version.source_url} target="_blank" rel="noreferrer"><Icon name="external" size={16} />Source notice</a>}
           {a.decision?.decision === "pursue" ? <>
             <button className="btn" disabled={busy} onClick={() => confirm("G1", Number(lotId), "not_for_us", "Marked as not for you.")}>Not for us</button>
             <Link className="btn primary" to={`/lots/${lotId}/preparation`}>Preparation plan</Link>

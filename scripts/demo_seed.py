@@ -10,7 +10,7 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tenderfit.assessment.confirm import confirm  # noqa: E402
 from tenderfit.assessment.pipeline import assess_lot  # noqa: E402
-from tenderfit.changes.apply import process_pending  # noqa: E402
+from tenderfit.changes.apply import process_pending, shadow_full  # noqa: E402
 from tenderfit.db import connect, migrate  # noqa: E402
 from tenderfit.documents import service as docs  # noqa: E402
 from tenderfit.ingest.client import FtsClient  # noqa: E402
@@ -110,6 +110,10 @@ def main():
         v2["tender"]["tenderPeriod"]["endDate"] = "2026-11-27T12:00:00Z"
         run_import(c, importer(v2), now.replace(year=2026, month=10, day=1), now, now=now)
         process_pending(c, llm, http=portal(), agent=True)
+        for job in c.execute("SELECT id, payload FROM job WHERE kind = 'shadow_full' AND status = 'queued'").fetchall():
+            shadow_full(c, job["payload"]["impact_id"], llm, http=portal(), agent=True)
+            c.execute("UPDATE job SET status = 'done', finished_at = now() WHERE id = %s", (job["id"],))
+        c.commit()
         r = json.loads((D / "releases/v1.json").read_text())
         r.update(ocid="ocds-test-riverside", id="030100-2026", date="2026-10-27T10:00:00Z",
                  buyer={"id": "GB-TEST-RIVERSIDE", "name": "Riverside Borough Council"})

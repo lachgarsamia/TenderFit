@@ -84,6 +84,7 @@ def _apply_version(conn: psycopg.Connection, raw_id: int, v: Version, digest: st
 
 
 def refresh_statuses(conn: psycopg.Connection, now: datetime, ocids: set[str] | None = None) -> int:
+    conn.execute("SELECT pg_advisory_xact_lock(7001)")
     wm = conn.execute("SELECT watermark FROM import_state WHERE source = %s", (SOURCE,)).fetchone()
     last_checked = wm["watermark"] if wm else None
     fresh_for = timedelta(hours=settings.status_fresh_hours)
@@ -93,7 +94,7 @@ def refresh_statuses(conn: psycopg.Connection, now: datetime, ocids: set[str] | 
                   (SELECT count(*) FROM linked_notice n WHERE n.ocid = o.ocid AND n.kind = 'cancellation') AS cancels,
                   (SELECT coalesce(jsonb_agg(n.lot_nos), '[]') FROM linked_notice n
                     WHERE n.ocid = o.ocid AND n.kind = 'award') AS awards
-           FROM opportunity o WHERE %s::text[] IS NULL OR o.ocid = ANY(%s)""",
+           FROM opportunity o WHERE %s::text[] IS NULL OR o.ocid = ANY(%s) ORDER BY o.id""",
         (list(ocids) if ocids is not None else None,) * 2,
     ).fetchall()
     for r in rows:

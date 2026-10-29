@@ -23,3 +23,5 @@ eval/recordings/
 eval/reports/
 web/dist/
 *.tsbuildinfo
+web/demo/
+web/dist-demo/
