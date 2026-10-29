@@ -1,0 +1,14 @@
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    database_url: str = "postgresql://tenderfit:tenderfit@localhost:5432/tenderfit"
+    fts_base_url: str = "https://www.find-tender.service.gov.uk/api/1.0"
+    import_interval_hours: float = 4
+    import_overlap_minutes: int = 60
+    import_chunk_hours: int = 24
+    status_fresh_hours: float = 24
+    http_max_retries: int = 8
+
+
+settings = Settings()
