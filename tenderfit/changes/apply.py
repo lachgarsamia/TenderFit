@@ -259,3 +259,37 @@ def process_pending(conn: psycopg.Connection, llm: LLM, http=None, **assess_kw) 
         out += apply_version_change(conn, cid, change, old, new, llm, **assess_kw)
     record_status_changes(conn)
     return out
+
+
+def apply_profile_change(conn: psycopg.Connection, lot_id: int, profile_id: int, fact_ids: list[int], llm: LLM,
+                         reason: str, **assess_kw) -> int | None:
+    a = conn.execute("""SELECT * FROM assessment WHERE lot_id = %s AND profile_id = %s AND NOT superseded AND NOT shadow
+                        AND status = 'done' ORDER BY id DESC LIMIT 1""", (lot_id, profile_id)).fetchone()
+    if not a:
+        return None
+    change = Change(cls="local")
+    plan = plan_reassessment(change, load_deps(conn, a["version_id"]), facts=set(fact_ids))
+    before = _verdicts(conn, a["id"])
+    affected_ids = plan.reassess | plan.rules_only
+    carry = {rid: v["id"] for rid, v in before.items() if rid not in affected_ids}
+    opp = conn.execute("SELECT opportunity_id FROM lot WHERE id = %s", (lot_id,)).fetchone()["opportunity_id"]
+    cid = conn.execute(
+        """INSERT INTO change_event (opportunity_id, kind, from_version_id, to_version_id, cls, reasons, summary)
+           VALUES (%s, 'profile', %s, %s, 'local', %s, %s) RETURNING id""",
+        (opp, a["version_id"], a["version_id"], [reason], Jsonb({"facts": fact_ids, "profile_id": profile_id}))).fetchone()["id"]
+    aid = assess_lot(conn, lot_id, profile_id, llm, version_id=a["version_id"], carry=carry, mode="targeted",
+                     reason=f"profile change: {reason}", **assess_kw)
+    after = _verdicts(conn, aid)
+    affected = [{"requirement_id": rid, "statement": v["statement"], "before": before[rid]["status"] if rid in before else None,
+                 "after": v["status"], "reason": v["reason"], "how": "fact used"}
+                for rid, v in after.items() if not v["carried_over"]]
+    recs = {r["id"]: r["recommendation"] for r in conn.execute(
+        "SELECT id, recommendation FROM assessment WHERE id = ANY(%s)", ([a["id"], aid],))}
+    kept = sum(v["carried_over"] for v in after.values())
+    text = explain(change, plan, before, after, recs[a["id"]], recs[aid], kept, affected)
+    conn.execute(
+        """INSERT INTO change_impact (change_id, lot_id, profile_id, before_assessment_id, after_assessment_id, mode, reason,
+                                      affected, kept, explanation) VALUES (%s, %s, %s, %s, %s, 'targeted', %s, %s, %s, %s)""",
+        (cid, lot_id, profile_id, a["id"], aid, reason, Jsonb(affected), kept, text))
+    conn.commit()
+    return aid

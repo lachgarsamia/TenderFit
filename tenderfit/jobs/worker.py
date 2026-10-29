@@ -15,7 +15,13 @@ log = logging.getLogger("tenderfit.worker")
 
 
 def run_import_job(conn: psycopg.Connection, payload: dict) -> dict:
-    return incremental(conn, FtsClient(), backfill_days=payload.get("backfill_days", 14))
+    from tenderfit.changes.apply import pending_version_changes, record_status_changes
+    out = incremental(conn, FtsClient(), backfill_days=payload.get("backfill_days", 14))
+    out["status_changes"] = record_status_changes(conn)
+    if pending_version_changes(conn) and not queue.pending(conn, "detect_changes"):
+        queue.enqueue(conn, "detect_changes", lock_key="changes")
+        conn.commit()
+    return out
 
 
 def run_assess_job(conn: psycopg.Connection, payload: dict) -> dict:
@@ -29,12 +35,34 @@ def run_daily_check(conn: psycopg.Connection, payload: dict) -> dict:
     from tenderfit.profile.service import daily_check
     out = daily_check(conn, datetime.now(timezone.utc).date())
     for lot in out["lots"]:
-        queue.enqueue(conn, "assess", {**lot, "reason": "profile fact expired or overdue"}, lock_key=f"lot:{lot['lot_id']}")
+        queue.enqueue(conn, "profile_change", {**lot, "facts": out["stale_facts"], "reason": "profile fact expired or overdue"},
+                      lock_key=f"lot:{lot['lot_id']}")
     conn.commit()
     return out
 
 
-HANDLERS = {"import": run_import_job, "assess": run_assess_job, "daily_check": run_daily_check}
+def run_detect_changes(conn: psycopg.Connection, payload: dict) -> dict:
+    from tenderfit.changes.apply import process_pending
+    from tenderfit.llm import default_llm
+    return {"impacts": process_pending(conn, default_llm())}
+
+
+def run_shadow_full(conn: psycopg.Connection, payload: dict) -> dict:
+    from tenderfit.changes.apply import shadow_full
+    from tenderfit.llm import default_llm
+    return shadow_full(conn, payload["impact_id"], default_llm())
+
+
+def run_profile_change(conn: psycopg.Connection, payload: dict) -> dict:
+    from tenderfit.changes.apply import apply_profile_change
+    from tenderfit.llm import default_llm
+    aid = apply_profile_change(conn, payload["lot_id"], payload["profile_id"], payload["facts"], default_llm(),
+                               payload.get("reason", "profile fact changed"))
+    return {"assessment_id": aid}
+
+
+HANDLERS = {"import": run_import_job, "assess": run_assess_job, "daily_check": run_daily_check,
+            "detect_changes": run_detect_changes, "shadow_full": run_shadow_full, "profile_change": run_profile_change}
 
 
 def schedule_daily_check(conn: psycopg.Connection, now: datetime) -> int | None:

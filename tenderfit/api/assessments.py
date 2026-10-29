@@ -19,6 +19,13 @@ def enqueue_assess(conn, pairs: list[tuple[int, int]], reason: str) -> list[int]
     return ids
 
 
+def enqueue_profile_change(conn, pairs: list[tuple[int, int]], facts: list[int], reason: str) -> list[int]:
+    ids = [queue.enqueue(conn, "profile_change", {"lot_id": lot, "profile_id": prof, "facts": facts, "reason": reason},
+                         lock_key=f"lot:{lot}") for lot, prof in sorted(set(pairs))]
+    conn.commit()
+    return ids
+
+
 def _lot(conn, lot_id: int) -> dict:
     lot = conn.execute(
         """SELECT l.*, o.id AS opportunity_id, o.ocid, o.title AS opportunity_title, o.current_version_id, o.status AS opp_status,
@@ -140,7 +147,7 @@ def put_fact(fact_id: int, body: FactUpdate):
             "SELECT DISTINCT a.lot_id, a.profile_id FROM verdict v JOIN assessment a ON a.id = v.assessment_id WHERE v.id = ANY(%s)",
             (verdict_ids,))]
         conn.commit()
-        return {"verdicts_rechecked": verdict_ids, "jobs": enqueue_assess(conn, pairs, "profile fact changed")}
+        return {"verdicts_rechecked": verdict_ids, "jobs": enqueue_profile_change(conn, pairs, [fact_id], "profile fact changed")}
 
 
 @router.post("/profile/evidence")
@@ -158,7 +165,7 @@ async def post_evidence(profile_id: int = Form(...), kind: str = Form(...), file
                 "WHERE v.id = ANY(%s)", (profiles.verdicts_using(conn, [fact_id]),))]
         conn.commit()
         return {"evidence_file_id": eid, "support_verified": verified,
-                "jobs": enqueue_assess(conn, pairs, "evidence added") if pairs else []}
+                "jobs": enqueue_profile_change(conn, pairs, [fact_id], "evidence added") if pairs else []}
 
 
 class AnswerIn(BaseModel):
@@ -197,7 +204,11 @@ def post_confirmation(body: ConfirmIn):
                           body.payload)
         except ConfirmationError as e:
             raise HTTPException(422, str(e))
-        out["jobs"] = enqueue_assess(conn, out.pop("reassess"), f"{body.point} {body.decision}")
+        pairs = out.pop("reassess")
+        if body.point == "G4":
+            out["jobs"] = enqueue_profile_change(conn, pairs, [body.target_id], f"G4 {body.decision}")
+        else:
+            out["jobs"] = enqueue_assess(conn, pairs, f"{body.point} {body.decision}")
         return out
 
 
@@ -227,3 +238,26 @@ def job(job_id: int):
     if not j:
         raise HTTPException(404, "job not found")
     return j
+
+
+@router.get("/changes")
+def changes(profile_id: int | None = None, limit: int = 50):
+    with connect() as conn:
+        events = conn.execute(
+            """SELECT c.*, o.title AS opportunity, b.name AS buyer, fv.published_at AS from_published, tv.published_at AS to_published,
+                      fv.release_id AS from_release, tv.release_id AS to_release
+               FROM change_event c JOIN opportunity o ON o.id = c.opportunity_id LEFT JOIN buyer b ON b.id = o.buyer_id
+               LEFT JOIN notice_version fv ON fv.id = c.from_version_id LEFT JOIN notice_version tv ON tv.id = c.to_version_id
+               ORDER BY c.detected_at DESC LIMIT %s""", (limit,)).fetchall()
+        impacts = conn.execute(
+            """SELECT i.*, l.lot_no, l.title AS lot_title, ab.recommendation AS before_recommendation,
+                      aa.recommendation AS after_recommendation
+               FROM change_impact i JOIN lot l ON l.id = i.lot_id
+               LEFT JOIN assessment ab ON ab.id = i.before_assessment_id LEFT JOIN assessment aa ON aa.id = i.after_assessment_id
+               WHERE i.change_id = ANY(%s) AND (%s::bigint IS NULL OR i.profile_id = %s) ORDER BY i.id""",
+            ([e["id"] for e in events], profile_id, profile_id)).fetchall()
+    by_change: dict[int, list] = {}
+    for i in impacts:
+        by_change.setdefault(i["change_id"], []).append(i)
+    return [{**e, "impacts": by_change.get(e["id"], [])} for e in events
+            if profile_id is None or e["kind"] == "status" or by_change.get(e["id"])]

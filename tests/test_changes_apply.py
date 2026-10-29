@@ -89,3 +89,24 @@ def test_profile_fact_change_reaches_verdicts_that_used_it(db, tmp_path, monkeyp
     assert statements == {"Deliver all desks within 30 days of order", "Supply 200 student desks"}
     assert set(update_fact(db, cap, value={"max_units": 300, "lead_days": 28})) == set(used)
 
+
+
+def test_changes_endpoint_and_profile_change(db, _test_db, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from tenderfit.api.main import app
+    from tenderfit.changes.apply import apply_profile_change
+    monkeypatch.setattr("tenderfit.config.settings.database_url", _test_db)
+    atlas, lot1, v1, llm, kw, a1 = setup_v1(db, tmp_path, monkeypatch)
+    cap = db.execute("SELECT id FROM profile_fact WHERE profile_id = %s AND attribute = 'capacity'", (atlas,)).fetchone()["id"]
+    db.execute("UPDATE profile_fact SET value = %s WHERE id = %s", ('{"max_units": 300, "lead_days": 28}', cap))
+    db.commit()
+    calls = len(llm.users)
+    aid = apply_profile_change(db, lot1, atlas, [cap], llm, "lead time changed to 28 days", **kw)
+    assert len(llm.users) == calls
+    rec = db.execute("SELECT recommendation FROM assessment WHERE id = %s", (aid,)).fetchone()["recommendation"]
+    assert not rec.startswith("Blocker found")
+    with TestClient(app) as c:
+        [ev] = c.get("/changes", params={"profile_id": atlas}).json()
+        assert ev["kind"] == "profile" and ev["impacts"][0]["kept"] == 4
+        moved = {a["statement"]: (a["before"], a["after"]) for a in ev["impacts"][0]["affected"]}
+        assert moved["Deliver all desks within 30 days of order"] == ("not_met", "needs_confirmation")
