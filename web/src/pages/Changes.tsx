@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { useProfile } from "../App";
+import { usePageTitle, useProfile } from "../App";
 import { api, fmtDate } from "../api";
-import { Card, Empty, ErrorNote, Tag, VerdictBadge } from "../components/ui";
+import { Card, Empty, ErrorNote, Skeleton, Tag, VerdictPill, human } from "../components/ui";
 
 const PATH_LABEL: Record<string, string> = {
-  "notice.deadline": "Submission deadline", "notice.title": "Title", "notice.value": "Estimated value", "notice.cpv": "CPV codes",
-  "lot.regions": "Delivery regions", "lot.quantity": "Lot quantity", "lot.title": "Lot title", "lot.description": "Lot description",
+  "notice.deadline": "Submission deadline", "notice.title": "Title", "notice.value": "Estimated value", "notice.cpv": "Product codes",
+  "lot.regions": "Delivery regions", "lot.quantity": "Quantity", "lot.title": "Lot title", "lot.description": "Lot description",
 };
+const CLS: Record<string, [string, string]> = { local: ["Targeted re-check", "info"], structural: ["Full re-check", "warn"], ambiguous: ["Full re-check", "warn"],
+  status: ["Status change", "bad"], external: ["Upload", "info"] };
 
 function show(v: any): string {
   if (v === null || v === undefined) return "—";
@@ -18,98 +20,92 @@ function show(v: any): string {
 }
 
 export default function Changes() {
+  usePageTitle("Changes");
   const { profile } = useProfile();
   const [events, setEvents] = useState<any[] | null>(null);
   const [sel, setSel] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    setEvents(null);
     api<any[]>(`/changes?profile_id=${profile!.id}`).then((e) => { setEvents(e); setSel(e.find((x) => x.kind !== "status")?.id ?? e[0]?.id ?? null); })
       .catch((e) => setError(e.message));
   }, [profile?.id]);
 
   const ev = events?.find((e) => e.id === sel);
-  const others = (events ?? []).filter((e) => e.id !== sel);
   const imp = ev?.impacts?.[0];
   const [head, ...lines] = (imp?.explanation ?? "").split("\n");
+  const rec = lines.map((l: string) => l.replace(/^- /, "")).find((l: string) => l.startsWith("Recommendation"));
 
   return (
     <>
-      <div className="crumb">Changes{ev ? ` / ${ev.buyer} · ${ev.opportunity}` : ""}</div>
-      <h1>What changed, and what it means for you</h1>
-      <p className="sub">Find a Tender keeps earlier versions of an edited tender notice, so both versions stay citable. Only published changes are tracked automatically; upload anything the buyer sent you directly.</p>
+      <div className="page-head">
+        <div>
+          <h1>What changed, and what it means for you</h1>
+          <p className="lede">When a buyer edits a tender, TenderFit compares the versions and re-checks only what the change touches. Changes sent to you directly are not visible here: upload them on the lot.</p>
+        </div>
+      </div>
       <ErrorNote error={error} />
-      {!events ? <Empty>Loading…</Empty> : events.length === 0 ? <Card><Empty>No changes yet for assessed opportunities. New notice versions are detected on each import.</Empty></Card> : (
-        <div className="grid-main">
-          <div>
-            {ev && ev.kind === "version" && <>
-              <div className="versions">
-                <div className="version"><div className="small muted">VERSION 1 · {ev.from_release}</div><strong>Published {fmtDate(ev.from_published, false)}</strong></div>
-                <span aria-hidden>⟶</span>
-                <div className="version current"><div className="small" style={{ color: "#b0651f" }}>VERSION 2 · CURRENT · {ev.to_release}</div><strong>Edited {fmtDate(ev.to_published, false)}</strong></div>
-                <Tag tone={ev.cls === "local" ? "info" : "warn"}>{ev.cls} change</Tag>
-              </div>
-              <Card title="Differences between versions" extra={`${ev.fields.length + ev.passages.length} changed${imp ? ` · ${imp.kept} verdicts unchanged` : ""}`}>
-                <table>
-                  <thead><tr><th>Field · source</th><th>Version 1</th><th>Version 2</th></tr></thead>
-                  <tbody>
-                    {ev.fields.map((f: any, i: number) => (
-                      <tr key={`f${i}`}><td><div style={{ fontWeight: 500 }}>{PATH_LABEL[f.path.split("@")[0]] ?? f.path}{f.path.includes("@") ? ` (lot ${f.path.split("@")[1]})` : ""}</div><div className="mono">Notice · fields</div></td>
-                        <td className="strike">{show(f.before)}</td><td className="warn-text">{show(f.after)}</td></tr>
-                    ))}
-                    {ev.passages.map((p: any, i: number) => (
-                      <tr key={`p${i}`}><td><div style={{ fontWeight: 500 }}>{p.section ?? "Passage"}</div><div className="mono">{p.document}</div></td>
-                        <td className="small strike">{p.kind === "added" ? "—" : p.before || "earlier wording"}</td>
-                        <td className="small"><span className="warn-text">{p.kind === "removed" ? "removed" : p.after}</span>
-                          <div className="muted">passage {p.kind}{p.kind === "modified" ? ` · ${Math.round(p.confidence)}% aligned` : ""}</div></td></tr>
-                    ))}
-                    {ev.documents.map((d: any, i: number) => (
-                      <tr key={`d${i}`}><td><div style={{ fontWeight: 500 }}>{d.label}</div><div className="mono">Notice · documents</div></td>
-                        <td className="small muted">{d.kind === "added" ? "—" : "present"}</td><td className="small warn-text">document {d.kind}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-                {ev.reasons.length > 0 && <div className="small muted" style={{ marginTop: 8 }}>Classified {ev.cls}: {ev.reasons.join("; ")}</div>}
-              </Card>
-            </>}
-            {ev && ev.kind === "profile" && <Card title="Change in your profile"><div>{ev.reasons.join("; ")}</div></Card>}
-            {imp && (
-              <Card title={`Effect on your assessment of Lot ${imp.lot_no}${imp.lot_title ? ` · ${imp.lot_title}` : ""}`}>
-                {imp.affected.map((x: any) => (
-                  <div key={x.requirement_id} style={{ marginBottom: 12 }}>
-                    <div style={{ fontWeight: 500, marginBottom: 6 }}>{x.statement} <span className="small muted">· {x.how}</span></div>
-                    <div className="before-after">
-                      <div className="ba"><div className="k">Before{ev.kind === "version" ? " · version 1" : ""}</div>{x.before ? <VerdictBadge status={x.before} small /> : <Tag>new requirement</Tag>}</div>
-                      <div className="ba after"><div className="k">After{ev.kind === "version" ? " · version 2" : ""}</div><VerdictBadge status={x.after} small /><div className="small" style={{ marginTop: 6 }}>{x.reason}</div></div>
-                    </div>
-                  </div>
-                ))}
-                <div className="before-after">
-                  <div className="ba"><div className="k">Recommendation before</div><div className="small">{imp.before_recommendation}</div></div>
-                  <div className="ba after"><div className="k">Recommendation after</div><div className="small">{imp.after_recommendation}</div></div>
-                </div>
-                {imp.requirements_added.length + imp.requirements_removed.length > 0 && <div className="small" style={{ marginTop: 10 }}>
-                  {imp.requirements_added.length > 0 && <>New: {imp.requirements_added.map((x: any) => x.statement).join("; ")}. </>}
-                  {imp.requirements_removed.length > 0 && <>Removed: {imp.requirements_removed.map((x: any) => x.statement).join("; ")}.</>}
-                </div>}
-              </Card>
-            )}
-          </div>
-          <div>
-            {imp && <Card title="Why the recommendation changed">
-              <p style={{ marginTop: 0 }}>{head}</p>
-              <ul className="steps">{lines.map((l: string, i: number) => <li key={i}>{l.replace(/^- /, "")}</li>)}</ul>
-              {imp.audit && <div className="small" style={{ marginTop: 8 }}>{imp.audit.agrees ? "✓ Background full reassessment agrees with the targeted one." :
-                `! Full reassessment disagreed on ${imp.audit.missed_dependencies.length} mandatory requirement(s); logged as a missed dependency.`}</div>}
-              <Link className="btn primary" style={{ marginTop: 10 }} to={`/lots/${imp.lot_id}`}>Open updated assessment</Link>
+      {!events ? <Card><Skeleton /></Card> : events.length === 0 ? <Card><Empty title="No changes yet">New versions of tenders you assessed appear here after each import.</Empty></Card> : (
+        <div className="split">
+          <div style={{ minWidth: 0 }}>
+            {ev?.kind === "version" && <div className="versions">
+              <div className="version"><div className="k">Version 1</div><strong>Published {fmtDate(ev.from_published, false)}</strong></div>
+              <span aria-hidden>→</span>
+              <div className="version current"><div className="k">Version 2 · current</div><strong>Edited {fmtDate(ev.to_published, false)}</strong></div>
+            </div>}
+            {ev?.kind === "version" && <Card flush title="Differences between versions" note={imp ? `${imp.kept} other verdicts unchanged` : undefined}>
+              <table>
+                <thead><tr><th>What</th><th>Before</th><th>After</th></tr></thead>
+                <tbody>
+                  {ev.fields.map((f: any, i: number) => (
+                    <tr key={`f${i}`}><td><div style={{ fontWeight: 500 }}>{PATH_LABEL[f.path.split("@")[0]] ?? f.path}</div><div className="mono">Notice</div></td>
+                      <td className="strike">{show(f.before)}</td><td className="status-warn">{show(f.after)}</td></tr>
+                  ))}
+                  {ev.passages.filter((p: any) => !p.section?.startsWith("Notice: submission")).map((p: any, i: number) => (
+                    <tr key={`p${i}`}><td><div style={{ fontWeight: 500 }}>{p.section ?? "Passage"}</div><div className="mono">{p.document}</div></td>
+                      <td className="small strike">{p.kind === "added" ? "—" : p.before}</td>
+                      <td className="small status-warn">{p.kind === "removed" ? "Removed" : p.after}</td></tr>
+                  ))}
+                  {ev.documents.map((d: any, i: number) => (
+                    <tr key={`d${i}`}><td><div style={{ fontWeight: 500 }}>{d.label}</div><div className="mono">Documents</div></td>
+                      <td className="small muted">{d.kind === "added" ? "—" : "Present"}</td><td className="small status-warn">Document {d.kind}</td></tr>
+                  ))}
+                </tbody>
+              </table>
             </Card>}
-            <Card title="Other changes">
-              {others.length === 0 ? <div className="small muted">None.</div> : others.map((o) => (
-                <div key={o.id} className={`list-change ${o.id === sel ? "selected" : ""}`} onClick={() => setSel(o.id)}>
-                  <div style={{ fontWeight: 500 }}>{o.buyer} · {o.opportunity}</div>
-                  {o.kind === "status" ? <div className="bad-text small">{o.summary.status === "cancelled" ? "Cancelled" : "Awarded"} · {fmtDate(o.detected_at, false)}</div>
-                    : <div className="small muted">{o.kind === "profile" ? "Profile change" : "New notice version"} · {fmtDate(o.detected_at, false)}</div>}
-                  <div className="small muted">{o.reasons.join("; ")}</div>
+            {ev?.kind === "profile" && <Card title="A fact in your profile changed"><div>{ev.reasons.join("; ")}</div></Card>}
+            {ev?.kind === "status" && <Card title={`${ev.buyer} · ${ev.opportunity}`}><div className="status-bad">{ev.reasons.join("; ")}</div>
+              <p className="small muted">Removed from your shortlist; the earlier assessment is archived.</p></Card>}
+            {imp && <Card title={`Effect on Lot ${imp.lot_no}${imp.lot_title ? ` · ${imp.lot_title}` : ""}`}>
+              {imp.affected.map((x: any) => (
+                <div key={x.requirement_id} style={{ marginBottom: 14 }}>
+                  <div style={{ fontWeight: 500 }}>{x.statement}</div>
+                  <div className="ba">
+                    <div><div className="k">Before</div>{x.before ? <VerdictPill status={x.before} /> : <Tag>New requirement</Tag>}</div>
+                    <div className="after"><div className="k">After</div><VerdictPill status={x.after} /><div className="small" style={{ marginTop: 6 }}>{human(x.reason)}</div></div>
+                  </div>
                 </div>
+              ))}
+              <div className="ba">
+                <div><div className="k">Recommendation before</div>{imp.before_recommendation}</div>
+                <div className="after"><div className="k">Recommendation now</div>{imp.after_recommendation}</div>
+              </div>
+            </Card>}
+          </div>
+          <div className="sticky">
+            {imp && <Card title="Why the recommendation changed">
+              <p style={{ marginTop: 0 }}>{head.replace(/\((\d) by rule, no model call\)/, "($1 by a fixed rule)")}</p>
+              {rec && <p className="small">The recommendation moved from <strong>{imp.before_recommendation}</strong> to <strong>{imp.after_recommendation}</strong>.</p>}
+              {imp.audit && <p className="small">{imp.audit.agrees ? "✓ A full re-check in the background agreed." : "! A full re-check disagreed; TenderFit logged it for review."}</p>}
+              <Link className="btn primary" to={`/lots/${imp.lot_id}`}>Open updated assessment</Link>
+            </Card>}
+            <Card title="All changes">
+              {events.map((o) => (
+                <button key={o.id} className="change-item" aria-current={o.id === sel} onClick={() => setSel(o.id)}>
+                  <div className="small muted">{fmtDate(o.detected_at, false)} · <Tag tone={CLS[o.cls]?.[1]}>{o.kind === "profile" ? "Profile" : CLS[o.cls]?.[0]}</Tag></div>
+                  <div style={{ fontWeight: 500 }}>{o.buyer}</div>
+                  <div className="small muted">{o.opportunity}</div>
+                </button>
               ))}
             </Card>
           </div>
