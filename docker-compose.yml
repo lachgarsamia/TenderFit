@@ -23,6 +23,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-tenderfit}:${POSTGRES_PASSWORD:-tenderfit}@db:5432/${POSTGRES_DB:-tenderfit}
     ports:
       - "8000:8000"
+    volumes:
+      - appdata:/data
     depends_on:
       db:
         condition: service_healthy
@@ -31,6 +33,8 @@ services:
     build: .
     command: python -m tenderfit.jobs.worker
     env_file: .env
+    volumes:
+      - appdata:/data
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-tenderfit}:${POSTGRES_PASSWORD:-tenderfit}@db:5432/${POSTGRES_DB:-tenderfit}
     depends_on:
@@ -39,3 +43,4 @@ services:
 
 volumes:
   pgdata:
+  appdata:

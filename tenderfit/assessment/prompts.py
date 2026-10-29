@@ -38,7 +38,8 @@ VERDICT_SCHEMA = {
 }
 
 
-def verdict_user(req: dict, passages: list[dict], facts: list[dict], today: str, deadline: str | None) -> str:
+def verdict_user(req: dict, passages: list[dict], facts: list[dict], today: str, deadline: str | None,
+                 answers: list[str] | None = None) -> str:
     ps = "\n\n".join(untrusted("tender_passage", p["text"], id=p["id"], document=p["document"],
                                section=p["section"] or "", page=p["page"] or "") for p in passages)
     fs = json.dumps(facts, default=str, indent=1)
@@ -47,4 +48,7 @@ def verdict_user(req: dict, passages: list[dict], facts: list[dict], today: str,
             f"Source quote: \"{req['quote']}\" (passage {req['passage_id']})\n"
             f"Equivalent allowed: {req['equivalent_allowed']}. Evidence the buyer asks for: "
             f"{', '.join(req['evidence_needed']) or 'not stated'}.\n\n"
-            f"Supplier profile facts (with evidence status and validity):\n{fs}\n\nPassages:\n\n{ps}")
+            f"Supplier profile facts (with evidence status and validity):\n{fs}\n\n"
+            + ("User answers to earlier questions (declared by the user, not proof):\n"
+               + "\n".join(untrusted("evidence", a, kind="user_answer") for a in answers) + "\n\n" if answers else "")
+            + f"Passages:\n\n{ps}")

@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 from psycopg.types.json import Jsonb
 
+from tenderfit.assessment.confirm import overrides
 from tenderfit.assessment.prompts import VERDICT_SCHEMA, VERDICT_SYSTEM, VERDICT_VERSION, verdict_user
 from tenderfit.config import settings
 from tenderfit.documents import references, service as docs
@@ -143,6 +144,9 @@ def decide(conn: psycopg.Connection, version_id: int, req: dict, facts: list[Fac
                 d.escalate.append("rule found no evidence")
             return d
     rel = relevant_facts(facts, req["category"])
+    answers = [r["answer"] for r in conn.execute(
+        """SELECT q.answer FROM question q WHERE q.requirement_id = %s AND q.answer IS NOT NULL ORDER BY q.answered_at""",
+        (req["id"],))]
     hits = search(conn, version_id, f"{req['statement']}\n{req['quote']}", k=5, emb=emb, rr=rr)
     passages = {h.id: {"id": h.id, "text": h.text, "section": h.section, "page": h.page, "document": h.document}
                 for h in hits}
@@ -151,7 +155,7 @@ def decide(conn: psycopg.Connection, version_id: int, req: dict, facts: list[Fac
             """SELECT p.id, p.text, p.section, p.page, coalesce(d.filename, 'document') document FROM passage p
                JOIN document d ON d.id = p.document_id WHERE p.id = %s""", (req["passage_id"],)).fetchone()
         passages[src["id"]] = dict(src)
-    key = _cache_key(version_id, req, rel, ctx, sorted(passages))
+    key = _cache_key(version_id, req, rel, ctx, sorted(passages) + answers)
     cached = conn.execute("SELECT result FROM verdict_cache WHERE key = %s", (key,)).fetchone()
     cost = 0.0
     if cached:
@@ -161,7 +165,7 @@ def decide(conn: psycopg.Connection, version_id: int, req: dict, facts: list[Fac
             return Decision(NEEDS if rel else UNKNOWN, "budget reached: not assessed by the model", "budget",
                             citations=[(req["passage_id"], req["quote"])], escalate=escalate + ["budget reached"])
         user = verdict_user(req, list(passages.values()), [_fact_json(f, ctx) for f in rel], str(ctx.today),
-                            str(ctx.deadline) if ctx.deadline else None)
+                            str(ctx.deadline) if ctx.deadline else None, answers)
         try:
             res = llm.json("verdict", VERDICT_SYSTEM, user, VERDICT_SCHEMA)
         except LLMError as e:
@@ -213,6 +217,7 @@ def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM,
         """SELECT * FROM requirement WHERE version_id = %s AND (lot_no IS NULL OR lot_no = %s) ORDER BY id""",
         (version_id, lot["lot_no"])).fetchall()
     spent, calls, budget_hit, vs = 0.0, 0, False, []
+    overridden = overrides(conn, profile_id)
     for req in reqs:
         d = decide(conn, version_id, req, facts, ctx, llm, settings.lot_cost_cap_usd - spent, emb, rr)
         spent += d.cost
@@ -236,8 +241,15 @@ def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM,
                 conn.execute("""INSERT INTO dependency (requirement_id, version_id, kind, target_type, target_id, recorded_by, verdict_id)
                                 VALUES (%s, %s, 'read', 'passage', %s, 'verdict', %s)""", (req["id"], version_id, str(pid), vid))
         if d.question:
-            conn.execute("INSERT INTO question (verdict_id, text) VALUES (%s, %s)", (vid, d.question))
-        vs.append(agg.V(req["id"], req["statement"], req["obligation"], req["category"], d.status, d.reason,
+            conn.execute("INSERT INTO question (verdict_id, requirement_id, text) VALUES (%s, %s, %s)",
+                         (vid, req["id"], d.question))
+        status = d.status
+        if d.status == NOT_MET and req["id"] in overridden:
+            o = overridden[req["id"]]
+            status = NEEDS
+            conn.execute("UPDATE verdict SET override_status = %s, override_reason = %s, override_by = %s WHERE id = %s",
+                         (NEEDS, o["reason"], o["user_name"], vid))
+        vs.append(agg.V(req["id"], req["statement"], req["obligation"], req["category"], status, d.reason,
                         _source_label(conn, req), d.question, d.basis))
     refs = [agg.Ref(r["label"], r["kind"], r["essential"], r["status"]) for r in inv["documents"]]
     product_cpv = [c for f in facts if f.attribute == "product" for c in f.value.get("cpv", [])]

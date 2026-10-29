@@ -18,6 +18,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="TenderFit", lifespan=lifespan)
 
+from tenderfit.api.assessments import router  # noqa: E402
+
+app.include_router(router)
+
 
 class LotOut(BaseModel):
     lot_no: str

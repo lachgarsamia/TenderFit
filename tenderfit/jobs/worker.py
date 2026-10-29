@@ -18,7 +18,32 @@ def run_import_job(conn: psycopg.Connection, payload: dict) -> dict:
     return incremental(conn, FtsClient(), backfill_days=payload.get("backfill_days", 14))
 
 
-HANDLERS = {"import": run_import_job}
+def run_assess_job(conn: psycopg.Connection, payload: dict) -> dict:
+    from tenderfit.assessment.pipeline import assess_lot
+    from tenderfit.llm import default_llm
+    aid = assess_lot(conn, payload["lot_id"], payload["profile_id"], default_llm(), reason=payload.get("reason"))
+    return {"assessment_id": aid}
+
+
+def run_daily_check(conn: psycopg.Connection, payload: dict) -> dict:
+    from tenderfit.profile.service import daily_check
+    out = daily_check(conn, datetime.now(timezone.utc).date())
+    for lot in out["lots"]:
+        queue.enqueue(conn, "assess", {**lot, "reason": "profile fact expired or overdue"}, lock_key=f"lot:{lot['lot_id']}")
+    conn.commit()
+    return out
+
+
+HANDLERS = {"import": run_import_job, "assess": run_assess_job, "daily_check": run_daily_check}
+
+
+def schedule_daily_check(conn: psycopg.Connection, now: datetime) -> int | None:
+    if queue.pending(conn, "daily_check") or conn.execute(
+            "SELECT 1 FROM job WHERE kind = 'daily_check' AND created_at > %s LIMIT 1", (now - timedelta(days=1),)).fetchone():
+        return None
+    job_id = queue.enqueue(conn, "daily_check")
+    conn.commit()
+    return job_id
 
 
 def schedule_import(conn: psycopg.Connection, now: datetime) -> int | None:
@@ -34,6 +59,7 @@ def schedule_import(conn: psycopg.Connection, now: datetime) -> int | None:
 
 def run_once(conn: psycopg.Connection) -> bool:
     schedule_import(conn, datetime.now(timezone.utc))
+    schedule_daily_check(conn, datetime.now(timezone.utc))
     job = queue.claim(conn)
     if not job:
         return False
