@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
@@ -33,6 +34,16 @@ class Linked:
 
 def content_hash(release: dict) -> str:
     return hashlib.sha256(json.dumps(release, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def finite(o):
+    if isinstance(o, float) and not math.isfinite(o):
+        return None
+    if isinstance(o, dict):
+        return {k: finite(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [finite(v) for v in o]
+    return o
 
 
 def parse_ts(value: str | None) -> datetime | None:
@@ -120,6 +131,7 @@ def normalise(release: dict) -> Version | Linked | None:
     fields = {
         "title": tender.get("title"),
         "buyer_id": (release.get("buyer") or {}).get("id"),
+        "buyer_name": (release.get("buyer") or {}).get("name"),
         "description": tender.get("description"),
         "source_status": tender.get("status"),
         "legal_basis": tender.get("legalBasis", {}).get("id"),

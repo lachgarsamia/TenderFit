@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from tenderfit.ingest.normalise import Linked, Version, normalise, parse_ts
+from tenderfit.ingest.normalise import Linked, Version, finite, normalise, parse_ts
 from tests.factories import uk4, uk6, uk12
 
 
@@ -47,3 +47,7 @@ def test_release_without_lots_gets_one_implicit_lot():
     r = uk4()
     del r["tender"]["lots"]
     assert [l["id"] for l in normalise(r).fields["lots"]] == ["1"]
+
+
+def test_non_finite_numbers_are_dropped_from_fields():
+    assert finite({"a": [float("inf"), 1.5], "b": float("nan")}) == {"a": [None, 1.5], "b": None}

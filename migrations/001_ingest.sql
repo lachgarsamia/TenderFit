@@ -4,7 +4,7 @@ CREATE TABLE raw_release (
     release_id text NOT NULL,
     release_date timestamptz NOT NULL,
     tags text[] NOT NULL,
-    payload jsonb NOT NULL,
+    payload text NOT NULL,
     sha256 text NOT NULL,
     source_url text NOT NULL,
     fetched_at timestamptz NOT NULL DEFAULT now(),
@@ -50,6 +50,7 @@ CREATE TABLE notice_version (
     fields jsonb NOT NULL,
     UNIQUE (ocid, release_id)
 );
+CREATE INDEX notice_version_buyer ON notice_version ((fields->>'buyer_id'));
 ALTER TABLE opportunity ADD FOREIGN KEY (current_version_id) REFERENCES notice_version (id);
 
 CREATE FUNCTION forbid_update() RETURNS trigger LANGUAGE plpgsql AS $$

@@ -1,12 +1,14 @@
 from datetime import datetime, timedelta, timezone
 
+import json
+
 import psycopg
 from psycopg.types.json import Jsonb
 
 from tenderfit.config import settings
 from tenderfit.ingest import status as st
 from tenderfit.ingest.client import FtsClient
-from tenderfit.ingest.normalise import Linked, Version, content_hash, normalise, parse_ts
+from tenderfit.ingest.normalise import Linked, Version, content_hash, finite, normalise, parse_ts
 
 SOURCE = "find_a_tender"
 
@@ -16,7 +18,7 @@ def store_raw(conn: psycopg.Connection, release: dict, source_url: str) -> tuple
         """INSERT INTO raw_release (ocid, release_id, release_date, tags, payload, sha256, source_url)
            VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (ocid, release_id) DO NOTHING RETURNING id""",
         (release["ocid"], release["id"], parse_ts(release["date"]), release.get("tag", []),
-         Jsonb(release), content_hash(release), source_url),
+         json.dumps(release, ensure_ascii=False), content_hash(release), source_url),
     ).fetchone()
     if row:
         return row["id"], True
@@ -43,7 +45,7 @@ def apply_release(conn: psycopg.Connection, raw_id: int, release: dict, retrieve
 
 def _apply_version(conn: psycopg.Connection, raw_id: int, v: Version, digest: str, retrieved_at: datetime) -> None:
     if v.buyer and v.buyer.get("id"):
-        conn.execute("INSERT INTO buyer (id, name) VALUES (%s, %s) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name",
+        conn.execute("INSERT INTO buyer (id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
                      (v.buyer["id"], v.buyer.get("name") or v.buyer["id"]))
     opp = conn.execute(
         "INSERT INTO opportunity (ocid) VALUES (%s) ON CONFLICT (ocid) DO UPDATE SET ocid = EXCLUDED.ocid RETURNING id",
@@ -54,7 +56,14 @@ def _apply_version(conn: psycopg.Connection, raw_id: int, v: Version, digest: st
                                        published_at, source_url, retrieved_at, content_hash, fields)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (ocid, release_id) DO NOTHING""",
         (opp, v.ocid, v.release_id, raw_id, v.notice_type, v.release_tag, v.published_at, v.source_url,
-         retrieved_at, digest, Jsonb(v.fields)),
+         retrieved_at, digest, Jsonb(finite(v.fields))),
+    )
+    conn.execute(
+        """UPDATE buyer SET name = coalesce((SELECT fields->>'buyer_name' FROM notice_version
+                                             WHERE fields->>'buyer_id' = buyer.id
+                                             ORDER BY published_at DESC, release_id DESC LIMIT 1), name)
+           WHERE id = %s""",
+        ((v.buyer or {}).get("id"),),
     )
     latest = conn.execute(
         "SELECT id, fields FROM notice_version WHERE ocid = %s ORDER BY published_at DESC, release_id DESC LIMIT 1",
@@ -67,12 +76,11 @@ def _apply_version(conn: psycopg.Connection, raw_id: int, v: Version, digest: st
         (f.get("buyer_id"), f["title"], f["legal_basis"], f["deadline"], f["cpv"], f["regions"],
          latest["id"], opp),
     )
+    for lot in v.fields["lots"]:
+        conn.execute("INSERT INTO lot (opportunity_id, lot_no) VALUES (%s, %s) ON CONFLICT DO NOTHING", (opp, lot["id"]))
     for lot in f["lots"]:
-        conn.execute(
-            """INSERT INTO lot (opportunity_id, lot_no, title, quantity) VALUES (%s, %s, %s, %s)
-               ON CONFLICT (opportunity_id, lot_no) DO UPDATE SET title = EXCLUDED.title, quantity = EXCLUDED.quantity""",
-            (opp, lot["id"], lot["title"], lot["quantity"]),
-        )
+        conn.execute("UPDATE lot SET title = %s, quantity = %s WHERE opportunity_id = %s AND lot_no = %s",
+                     (lot["title"], lot["quantity"], opp, lot["id"]))
 
 
 def refresh_statuses(conn: psycopg.Connection, now: datetime, ocids: set[str] | None = None) -> int:
@@ -162,7 +170,7 @@ def replay(conn: psycopg.Connection, now: datetime | None = None) -> dict:
         conn.execute("TRUNCATE lot, linked_notice, notice_version, opportunity, buyer RESTART IDENTITY CASCADE")
         applied = 0
         for r in conn.execute("SELECT id, payload, fetched_at FROM raw_release ORDER BY release_date, id").fetchall():
-            applied += apply_release(conn, r["id"], r["payload"], r["fetched_at"]) is not None
+            applied += apply_release(conn, r["id"], json.loads(r["payload"]), r["fetched_at"]) is not None
         refresh_statuses(conn, now or datetime.now(timezone.utc))
     conn.commit()
     return {"applied": applied}

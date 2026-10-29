@@ -1,3 +1,4 @@
+import json
 import threading
 from datetime import datetime, timezone
 
@@ -19,7 +20,8 @@ def fake(*pages):
     def handler(req):
         i = int(req.url.params.get("cursor", 0))
         links = {"next": f"https://fts.test/x?cursor={i + 1}"} if i + 1 < len(pages) else {}
-        return httpx.Response(200, json={"releases": pages[i], "links": links})
+        return httpx.Response(200, content=json.dumps({"releases": pages[i], "links": links}),
+                              headers={"content-type": "application/json"})
     return FtsClient(httpx.Client(transport=httpx.MockTransport(handler)), "https://fts.test", sleep=lambda s: None)
 
 
@@ -48,6 +50,15 @@ def test_out_of_order_update_does_not_regress_current_version(db):
     assert cur["release_id"] == "000150-2026"
 
 
+def test_lots_do_not_depend_on_arrival_order(db):
+    v1 = uk4(lots=("1", "2"))
+    v2 = uk4(rid="000150-2026", tag="tenderUpdate", date="2026-10-01T12:00:00Z", lots=("1",))
+    run_import(db, fake([v2, v1]), T0, T1, now=NOW)
+    shuffled = [r["lot_no"] for r in db.execute("SELECT lot_no FROM lot ORDER BY lot_no")]
+    replay(db, now=NOW)
+    assert shuffled == [r["lot_no"] for r in db.execute("SELECT lot_no FROM lot ORDER BY lot_no")] == ["1", "2"]
+
+
 def test_versions_and_raw_are_immutable(db):
     run_import(db, fake([uk4()]), T0, T1, now=NOW)
     for table in ("notice_version", "raw_release"):
@@ -72,6 +83,14 @@ def test_failed_run_keeps_watermark_and_logs_error(db):
         run_import(db, broken, T0, T1, now=NOW)
     assert db.execute("SELECT count(*) n FROM import_state").fetchone()["n"] == 0
     assert db.execute("SELECT error FROM import_run").fetchone()["error"]
+
+
+def test_raw_release_with_infinity_is_stored_verbatim(db):
+    r = uk4()
+    r["tender"]["lots"][0]["value"] = {"amount": float("inf")}
+    run_import(db, fake([r]), T0, T1, now=NOW)
+    assert "Infinity" in db.execute("SELECT payload FROM raw_release").fetchone()["payload"]
+    assert db.execute("SELECT count(*) n FROM notice_version").fetchone()["n"] == 1
 
 
 def test_replay_rebuilds_same_state_from_raw(db):
