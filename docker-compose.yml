@@ -1,0 +1,40 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tenderfit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tenderfit}
+      POSTGRES_DB: ${POSTGRES_DB:-tenderfit}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tenderfit}"]
+      interval: 2s
+      retries: 30
+
+  api:
+    build: .
+    command: uvicorn tenderfit.api.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tenderfit}:${POSTGRES_PASSWORD:-tenderfit}@db:5432/${POSTGRES_DB:-tenderfit}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: python -m tenderfit.jobs.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tenderfit}:${POSTGRES_PASSWORD:-tenderfit}@db:5432/${POSTGRES_DB:-tenderfit}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
