@@ -256,7 +256,7 @@ def process_pending(conn: psycopg.Connection, llm: LLM, http=None, **assess_kw) 
     out = []
     for old, new in pending_version_changes(conn):
         cid, change = detect(conn, old, new, http)
-        out += apply_version_change(conn, cid, change, old, new, llm, **assess_kw)
+        out += apply_version_change(conn, cid, change, old, new, llm, http=http, **assess_kw)
     record_status_changes(conn)
     return out
 

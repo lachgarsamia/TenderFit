@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 from psycopg.types.json import Jsonb
 
+from tenderfit.assessment.config import PipelineConfig
 from tenderfit.assessment.confirm import overrides
 from tenderfit.assessment.prompts import VERDICT_SCHEMA, VERDICT_SYSTEM, VERDICT_VERSION, verdict_user
 from tenderfit.config import settings
@@ -125,6 +126,14 @@ def guard(raw: dict, facts: list[Fact], ctx: Context, req: dict, passages: dict[
                     raw.get("question"), needs_human, escalate)
 
 
+def unguarded(raw: dict, facts: list[Fact], passages: dict[int, dict]) -> Decision:
+    """B1: the model's verdict as given; citations kept without verification."""
+    ids = {f.id for f in facts}
+    used = [i for i in raw.get("supporting_fact_ids", []) + raw.get("contrary_fact_ids", []) if i in ids]
+    cites = [(c["passage_id"], c["quote"]) for c in raw.get("citations", []) if c["passage_id"] in passages]
+    return Decision(raw["status"], raw["reason"], "model", None, used, cites, [p for p, _ in cites], [], raw.get("question"))
+
+
 def _cache_key(version_id: int, req: dict, facts: list[Fact], ctx: Context, passages: list[int]) -> str:
     payload = [VERDICT_VERSION, version_id, req["id"], str(ctx.today), passages,
                [(f.id, f.evidence_status, str(f.valid_until), str(f.confirm_by), f.confirmed_for_lot,
@@ -133,11 +142,12 @@ def _cache_key(version_id: int, req: dict, facts: list[Fact], ctx: Context, pass
 
 
 def decide(conn: psycopg.Connection, version_id: int, req: dict, facts: list[Fact], ctx: Context, llm: LLM,
-           budget_left: float, emb: Embedder | None = None, rr: Reranker | None = None) -> Decision:
+           budget_left: float, emb: Embedder | None = None, rr: Reranker | None = None,
+           config: PipelineConfig = PipelineConfig("B2")) -> Decision:
     source = conn.execute("SELECT text FROM passage WHERE id = %s", (req["passage_id"],)).fetchone()
     escalate = ["unresolved cross-reference in the source passage"] if source and references.has_unresolved_cue(source["text"]) else []
     rule: RuleResult | None = None
-    if req["condition"]:
+    if req["condition"] and config.rules:
         rule = evaluate(Condition(**req["condition"]), facts, ctx, category=req["category"],
                         proof_needed=bool(req["evidence_needed"]))
         if not rule.reason.startswith(RULE_FALLTHROUGH):
@@ -146,11 +156,11 @@ def decide(conn: psycopg.Connection, version_id: int, req: dict, facts: list[Fac
             if d.status == UNKNOWN:
                 d.escalate.append("rule found no evidence")
             return d
-    rel = relevant_facts(facts, req["category"])
+    rel = relevant_facts(facts, req["category"]) if config.rules else facts
     answers = [r["answer"] for r in conn.execute(
         """SELECT q.answer FROM question q WHERE q.requirement_id = %s AND q.answer IS NOT NULL ORDER BY q.answered_at""",
         (req["id"],))]
-    hits = search(conn, version_id, f"{req['statement']}\n{req['quote']}", k=5, emb=emb, rr=rr)
+    hits = search(conn, version_id, f"{req['statement']}\n{req['quote']}", k=5, emb=emb, rr=rr, hybrid=config.hybrid)
     passages = {h.id: {"id": h.id, "text": h.text, "section": h.section, "page": h.page, "document": h.document}
                 for h in hits}
     if req["passage_id"] not in passages:
@@ -158,7 +168,7 @@ def decide(conn: psycopg.Connection, version_id: int, req: dict, facts: list[Fac
             """SELECT p.id, p.text, p.section, p.page, coalesce(d.filename, 'document') document FROM passage p
                JOIN document d ON d.id = p.document_id WHERE p.id = %s""", (req["passage_id"],)).fetchone()
         passages[src["id"]] = dict(src)
-    key = _cache_key(version_id, req, rel, ctx, sorted(passages) + answers)
+    key = _cache_key(version_id, req, rel, ctx, sorted(passages) + answers + [config.name])
     cached = conn.execute("SELECT result FROM verdict_cache WHERE key = %s", (key,)).fetchone()
     cost, tokens = 0.0, 0
     if cached:
@@ -177,7 +187,7 @@ def decide(conn: psycopg.Connection, version_id: int, req: dict, facts: list[Fac
         raw, cost, tokens = res.data, res.usage.cost_usd, res.usage.input_tokens + res.usage.output_tokens
         log_call(conn, "verdict", VERDICT_VERSION, res.usage, {"version_id": version_id, "requirement_id": req["id"]})
         conn.execute("INSERT INTO verdict_cache (key, result) VALUES (%s, %s) ON CONFLICT DO NOTHING", (key, Jsonb(raw)))
-    d = guard(raw, rel, ctx, req, passages)
+    d = guard(raw, rel, ctx, req, passages) if config.guard else unguarded(raw, rel, passages)
     d.cost, d.tokens = cost, tokens
     d.escalate = escalate + d.escalate + (["model verdict unknown"] if d.status == UNKNOWN else [])
     if (req["passage_id"], req["quote"]) not in d.citations:
@@ -224,7 +234,8 @@ def _carry_verdict(conn: psycopg.Connection, aid: int, req: dict, old_vid: int, 
 def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM, today: date | None = None,
                http=None, emb: Embedder | None = None, rr: Reranker | None = None, mode: str = "full",
                reason: str | None = None, version_id: int | None = None, carry: dict[int, int] | None = None,
-               pmap: dict[int, int] | None = None, shadow: bool = False, agent: bool | None = None) -> int:
+               pmap: dict[int, int] | None = None, shadow: bool = False, agent: bool | None = None,
+               config: PipelineConfig | None = None) -> int:
     """carry maps requirement ids of this version to verdict ids to copy unchanged (targeted reassessment)."""
     today = today or datetime.now(LONDON).date()
     lot, ctx = lot_context(conn, lot_id, today)
@@ -251,7 +262,9 @@ def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM,
     from tenderfit.agent.loop import Budget, run_agent
 
     budget, calls, budget_hit, vs = Budget(), 0, False, []
-    use_agent = settings.agent_enabled if agent is None else agent
+    config = config or PipelineConfig("B3" if (settings.agent_enabled if agent is None else agent) else "B2",
+                                      agent=settings.agent_enabled if agent is None else agent)
+    use_agent = config.agent
     overridden = overrides(conn, profile_id)
     for req in reqs:
         if req["id"] in carry:
@@ -263,7 +276,7 @@ def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM,
                             NEEDS if old["status"] == NOT_MET and _overridden(req, overridden) else old["status"],
                             old["reason"], _source_label(conn, req), old["question"], old["basis"]))
             continue
-        d = decide(conn, version_id, req, facts, ctx, llm, budget.left, emb, rr)
+        d = decide(conn, version_id, req, facts, ctx, llm, budget.left, emb, rr, config)
         budget.spend(d.cost, d.tokens)
         calls += d.cost > 0
         rule_settled = d.decided_by == "rule" and d.status != UNKNOWN
@@ -310,7 +323,7 @@ def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM,
                          (NEEDS, o["reason"], o["user_name"], vid))
         vs.append(agg.V(req["id"], req["statement"], req["obligation"], req["category"], status, d.reason,
                         _source_label(conn, req), d.question, d.basis))
-    refs = [agg.Ref(r["label"], r["kind"], r["essential"], r["status"]) for r in inv["documents"]]
+    refs = [agg.Ref(r["label"], r["kind"], r["essential"], r["status"] if config.coverage else "read") for r in inv["documents"]]
     product_cpv = [c for f in facts if f.attribute == "product" for c in f.value.get("cpv", [])]
     region = next((f.value.get("itl", []) for f in facts if f.attribute == "region"), [])
     rel = agg.relevance(ctx.fields["lot.cpv"] or [], product_cpv, ctx.fields["lot.regions"] or [], region)

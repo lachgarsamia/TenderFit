@@ -94,8 +94,9 @@ class Hit:
 
 
 def search(conn: psycopg.Connection, version_id: int, query: str, k: int = 5, pool: int = 50, rerank_top: int = 20,
-           emb: Embedder | None = None, rr: Reranker | None = None, exclude: set[int] | None = None) -> list[Hit]:
-    lexical = [r["id"] for r in conn.execute(
+           emb: Embedder | None = None, rr: Reranker | None = None, exclude: set[int] | None = None,
+           hybrid: bool = True) -> list[Hit]:
+    lexical = [] if not hybrid else [r["id"] for r in conn.execute(
         """SELECT p.id FROM passage p JOIN document d ON d.id = p.document_id
            WHERE d.version_id = %s AND p.tsv @@ to_tsquery('english', %s)
            ORDER BY ts_rank_cd(p.tsv, to_tsquery('english', %s)) DESC, p.id LIMIT %s""",
@@ -115,7 +116,7 @@ def search(conn: psycopg.Connection, version_id: int, query: str, k: int = 5, po
     rows = {r["id"]: r for r in conn.execute(
         """SELECT p.id, p.text, p.section, p.page, p.document_id, coalesce(d.filename, 'document') AS document
            FROM passage p JOIN document d ON d.id = p.document_id WHERE p.id = ANY(%s)""", (ids,))}
-    scores = (rr or reranker()).score(query, [rows[i]["text"] for i in ids])
+    scores = (rr or reranker()).score(query, [rows[i]["text"] for i in ids]) if hybrid else [fused[i] for i in ids]
     hits = [Hit(i, rows[i]["text"], rows[i]["section"], rows[i]["page"], rows[i]["document"], rows[i]["document_id"], s,
                 lexical.index(i) + 1 if i in lexical else None, vector.index(i) + 1 if i in vector else None)
             for i, s in zip(ids, scores)]

@@ -1,0 +1,133 @@
+{
+ "note": "Fictional running example (spec Appendix A); labels by the authors. Smoke test of the harness, not a result.",
+ "today": "2026-10-14",
+ "notices": [
+  {
+   "id": "northfield",
+   "releases": [
+    "releases/v1.json"
+   ],
+   "documents": {
+    "https://portal.test/Spec_Desks_v1.pdf": "docs/Spec_Desks_v1.pdf"
+   },
+   "uploads": [
+    {
+     "ref_label": "Instructions to Tenderers",
+     "file": "docs/ITT.docx"
+    }
+   ],
+   "confirm_none": [
+    "Appendix B",
+    "Appendix C"
+   ],
+   "essential_documents": [
+    "Specification",
+    "Instructions to Tenderers"
+   ],
+   "lots": {
+    "1": {
+     "profiles": {
+      "Atlas Furniture": {
+       "relevant": true
+      }
+     }
+    }
+   },
+   "requirements": [
+    {
+     "id": "R1",
+     "lot": "1",
+     "statement": "Deliver all desks within 30 days of order",
+     "quote_contains": "deliver all desks within",
+     "obligation": "mandatory",
+     "verdicts": {
+      "Atlas Furniture": "not_met"
+     },
+     "verdicts_after": {
+      "Atlas Furniture": "needs_confirmation"
+     }
+    },
+    {
+     "id": "R2",
+     "lot": "1",
+     "statement": "Supply 200 student desks",
+     "quote_contains": "200 student desks",
+     "obligation": "mandatory",
+     "verdicts": {
+      "Atlas Furniture": "met"
+     },
+     "verdicts_after": {
+      "Atlas Furniture": "met"
+     }
+    },
+    {
+     "id": "R3",
+     "lot": "1",
+     "statement": "Installation included",
+     "quote_contains": "Installation of all desks",
+     "obligation": "mandatory",
+     "verdicts": {
+      "Atlas Furniture": "met"
+     },
+     "verdicts_after": {
+      "Atlas Furniture": "met"
+     }
+    },
+    {
+     "id": "R4",
+     "lot": "1",
+     "statement": "Desks meet BS EN 1729-2 or an accepted equivalent",
+     "quote_contains": "BS EN 1729-2",
+     "obligation": "mandatory",
+     "hard": true,
+     "verdicts": {
+      "Atlas Furniture": "unknown"
+     },
+     "verdicts_after": {
+      "Atlas Furniture": "unknown"
+     }
+    },
+    {
+     "id": "R5",
+     "lot": "1",
+     "statement": "Comparable contract (150+ items, last 3 years) with reference",
+     "quote_contains": "comparable contract",
+     "obligation": "mandatory",
+     "hard": true,
+     "verdicts": {
+      "Atlas Furniture": "needs_confirmation"
+     },
+     "verdicts_after": {
+      "Atlas Furniture": "needs_confirmation"
+     }
+    },
+    {
+     "id": "R6",
+     "lot": "1",
+     "statement": "Share of recycled material (scored)",
+     "quote_contains": "recycled material",
+     "obligation": "scored",
+     "verdicts": {
+      "Atlas Furniture": "unknown"
+     },
+     "verdicts_after": {
+      "Atlas Furniture": "unknown"
+     }
+    }
+   ],
+   "amendments": [
+    {
+     "release": "releases/v2.json",
+     "type": "direct + indirect (deadline parameter)",
+     "documents": {
+      "https://portal.test/Spec_Desks_v2.pdf": "docs/Spec_Desks_v2.pdf"
+     },
+     "affected": [
+      "R1",
+      "R5"
+     ]
+    }
+   ]
+  }
+ ]
+}

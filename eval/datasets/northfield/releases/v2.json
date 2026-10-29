@@ -1,0 +1,104 @@
+{
+ "ocid": "ocds-test-northfield",
+ "id": "029400-2026",
+ "date": "2026-10-12T18:00:00Z",
+ "tag": [
+  "tenderUpdate"
+ ],
+ "buyer": {
+  "id": "GB-TEST-NORTHFIELD",
+  "name": "Northfield University"
+ },
+ "tender": {
+  "title": "Student desks and seating",
+  "status": "active",
+  "description": "Teaching-space furniture.",
+  "legalBasis": {
+   "id": "2023/54"
+  },
+  "tenderPeriod": {
+   "endDate": "2026-11-06T12:00:00Z"
+  },
+  "lots": [
+   {
+    "id": "1",
+    "title": "Student desks",
+    "description": "Supply and installation of student desks.",
+    "status": "active"
+   },
+   {
+    "id": "2",
+    "title": "Seating",
+    "status": "active"
+   }
+  ],
+  "items": [
+   {
+    "id": "1",
+    "relatedLot": "1",
+    "quantity": 200,
+    "additionalClassifications": [
+     {
+      "scheme": "CPV",
+      "id": "39160000"
+     }
+    ],
+    "deliveryAddresses": [
+     {
+      "region": "UKE"
+     }
+    ]
+   },
+   {
+    "id": "2",
+    "relatedLot": "2",
+    "additionalClassifications": [
+     {
+      "scheme": "CPV",
+      "id": "39110000"
+     }
+    ],
+    "deliveryAddresses": [
+     {
+      "region": "UKE"
+     }
+    ]
+   }
+  ],
+  "selectionCriteria": {
+   "criteria": [
+    {
+     "type": "economic",
+     "description": "Public liability insurance",
+     "minimum": "At least \u00a35m public liability insurance."
+    }
+   ]
+  },
+  "documents": [
+   {
+    "id": "D-1",
+    "documentType": "technicalSpecifications",
+    "title": "Specification",
+    "url": "https://portal.test/Spec_Desks_v2.pdf"
+   },
+   {
+    "id": "D-2",
+    "documentType": "biddingDocuments",
+    "title": "Instructions to Tenderers",
+    "url": "https://portal.test/login"
+   },
+   {
+    "id": "D-3",
+    "documentType": "biddingDocuments",
+    "title": "Pricing schedule",
+    "url": "https://portal.test/login"
+   },
+   {
+    "id": "029400-2026",
+    "documentType": "tenderNotice",
+    "noticeType": "UK4",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029400-2026"
+   }
+  ]
+ }
+}
