@@ -22,3 +22,4 @@ eval/work/
 eval/recordings/
 eval/reports/
 web/dist/
+*.tsbuildinfo
