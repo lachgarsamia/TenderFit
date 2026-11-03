@@ -1,12 +1,14 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { Link, NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { STATIC, SNAPSHOT_META, api, fmtDate } from "./api";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Icon } from "./components/ui";
 import Assessment from "./pages/Assessment";
 import Changes from "./pages/Changes";
 import Opportunities from "./pages/Opportunities";
 import Preparation from "./pages/Preparation";
 import Profile from "./pages/Profile";
+import Tender from "./pages/Tender";
 
 export type Profile = { id: number; name: string; regions: string[]; description: string; is_fictional: boolean };
 type Ctx = { profile: Profile | null; refreshChanges: () => void };
@@ -22,11 +24,15 @@ export default function App() {
   const [profileId, setProfileId] = useState<number>(() => Number(localStorage.getItem("profileId") || 0));
   const [changes, setChanges] = useState(0);
   const [failed, setFailed] = useState(false);
+  const location = useLocation();
   const profile = profiles.find((p) => p.id === profileId) ?? profiles[0] ?? null;
 
   useEffect(() => { api<Profile[]>("/profiles").then(setProfiles).catch(() => setFailed(true)); }, []);
   const refreshChanges = () => {
-    if (profile) api<any[]>(`/changes?profile_id=${profile.id}`).then((c) => setChanges(c.length)).catch(() => {});
+    // Only what still needs attention counts; the page itself reports a failure to load.
+    if (profile) api<any[]>(`/changes?profile_id=${profile.id}`)
+      .then((c) => setChanges(c.filter((e) => e.status !== "superseded").length))
+      .catch((e) => console.warn("Could not refresh the change count", e));
   };
   useEffect(refreshChanges, [profile?.id]);
   const choose = (id: number) => { localStorage.setItem("profileId", String(id)); setProfileId(id); };
@@ -48,7 +54,7 @@ export default function App() {
               <select id="ws" value={profile?.id ?? ""} onChange={(e) => choose(Number(e.target.value))}>
                 {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
-              {profile?.is_fictional && <div className="fic">Fictional test profile. Tender notices are {STATIC ? "a dated snapshot of" : ""} live data{STATIC ? " from Find a Tender" : ""}.</div>}
+              {profile?.is_fictional && <div className="fic">Fictional test profile.</div>}
             </div>
           )}
         </aside>
@@ -57,18 +63,19 @@ export default function App() {
             <strong>Read-only demo</strong>
             <p>Tender notices are real data from Find a Tender, captured {fmtDate(SNAPSHOT_META?.captured_at)}. The three companies and the two notices marked Demo are fictional, and the AI answers on those notices are scripted. Buttons that change data are switched off.</p>
           </div></div>}
-          {failed ? <div className="empty"><strong>TenderFit can't reach its server.</strong>Start the API on port 8000 and reload.</div> :
-            !profile ? <div className="empty">Loading…</div> : (
-            <Routes>
+          {failed ? <div className="empty" role="alert"><strong>TenderFit can't reach its server.</strong>It may be restarting. Reload in a moment; if this stays, check that the API is running.</div> :
+            !profile ? <div className="empty">{profiles.length === 0 && !failed ? "Loading…" : "No workspace found."}</div> : (
+            <ErrorBoundary resetKey={location.pathname}><Routes>
               <Route path="/" element={<Navigate to="/opportunities" replace />} />
               <Route path="/opportunities" element={<Opportunities />} />
+              <Route path="/tenders/:tenderId" element={<Tender />} />
               <Route path="/lots/:lotId" element={<Assessment />} />
               <Route path="/changes" element={<Changes />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/preparation" element={<Preparation />} />
               <Route path="/lots/:lotId/preparation" element={<Preparation />} />
               <Route path="*" element={<div className="empty"><strong>Page not found.</strong><Link to="/opportunities">Back to opportunities</Link></div>} />
-            </Routes>
+            </Routes></ErrorBoundary>
           )}
         </main>
       </div>

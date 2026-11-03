@@ -9,8 +9,9 @@ import pymupdf
 from psycopg.types.json import Jsonb
 
 from tenderfit.config import settings
-from tenderfit.documents.text import quote_score, QUOTE_THRESHOLD
+from tenderfit.documents.text import QUOTE_THRESHOLD, quote_score
 from tenderfit.profile.validity import FactView, daily_status, default_confirm_by
+from tenderfit.profile.verify import verify_fact_evidence
 
 
 def upsert_profile(conn: psycopg.Connection, name: str, regions: list[str], description: str,
@@ -72,28 +73,69 @@ def add_evidence(conn: psycopg.Connection, profile_id: int, kind: str, filename:
     return eid
 
 
+def _verify(conn: psycopg.Connection, fact_id: int, evidence_file_id: int, quote_ok_: bool, stated: date | None) -> dict:
+    row = conn.execute("""SELECT f.*, p.name AS profile_name FROM profile_fact f JOIN business_profile p ON p.id = f.profile_id
+                          WHERE f.id = %s""", (fact_id,)).fetchone()
+    pages = [r["text"] for r in conn.execute("SELECT text FROM evidence_page WHERE evidence_file_id = %s ORDER BY page", (evidence_file_id,))]
+    result = verify_fact_evidence(row, row["profile_name"], pages, quote_ok_, date.today(), stated)
+    checks = {k: v for k, v in result["checks"].items()}
+    conn.execute("INSERT INTO fact_verification (fact_id, evidence_file_id, level, checks) VALUES (%s, %s, %s, %s)",
+                 (fact_id, evidence_file_id, result["level"], Jsonb(checks)))
+    return result
+
+
 def link_support(conn: psycopg.Connection, fact_id: int, evidence_file_id: int, page: int, quote: str) -> bool:
+    """Link a file to a fact. The fact counts as document-backed only if the quote is in the file and nothing in it contradicts the fact."""
     row = conn.execute("SELECT text FROM evidence_page WHERE evidence_file_id = %s AND page = %s",
                        (evidence_file_id, page)).fetchone()
     score = quote_score(quote, row["text"]) if row else 0.0
-    ok = score >= QUOTE_THRESHOLD
+    found = score >= QUOTE_THRESHOLD
+    ef = conn.execute("SELECT expires_on FROM evidence_file WHERE id = %s", (evidence_file_id,)).fetchone()
+    result = _verify(conn, fact_id, evidence_file_id, found, ef["expires_on"])
+    ok = found and not result["mismatch"]
     conn.execute(
         "INSERT INTO fact_support (fact_id, evidence_file_id, page, quote, verified, score) VALUES (%s, %s, %s, %s, %s, %s)",
         (fact_id, evidence_file_id, page, quote, ok, score))
     if ok:
-        ef = conn.execute("SELECT expires_on FROM evidence_file WHERE id = %s", (evidence_file_id,)).fetchone()
+        expiry = ef["expires_on"] or result.get("expiry")
+        if expiry and expiry < date.today():
+            # An expired document is on file, but it proves nothing current.
+            conn.execute("""UPDATE profile_fact SET valid_until = greatest(valid_until, %s), updated_at = now() WHERE id = %s""", (expiry, fact_id))
+            return ok
         conn.execute(
-            """UPDATE profile_fact SET evidence_status = CASE WHEN evidence_status IN ('declared', 'missing', 'unknown')
-                                                              THEN 'document_on_file' ELSE evidence_status END,
-                      valid_until = coalesce(valid_until, %s) WHERE id = %s""", (ef["expires_on"], fact_id))
+            """UPDATE profile_fact SET evidence_status = 'document_on_file', needs_update_reason = NULL, updated_at = now(),
+                      valid_until = CASE WHEN %(e)s::date IS NULL THEN valid_until ELSE greatest(valid_until, %(e)s) END
+               WHERE id = %(f)s""", {"e": expiry, "f": fact_id})
     return ok
+
+
+def renew_evidence(conn: psycopg.Connection, fact_id: int, filename: str, content: bytes, page: int, quote: str, expires_on: date,
+                   issuer: str | None = None) -> dict:
+    """A renewed certificate or policy: the newer document replaces the expired state, if it really supports the fact."""
+    fact = conn.execute("SELECT profile_id, attribute FROM profile_fact WHERE id = %s", (fact_id,)).fetchone()
+    eid = add_evidence(conn, fact["profile_id"], fact["attribute"], filename, content, issuer, None, expires_on)
+    ok = link_support(conn, fact_id, eid, page, quote)
+    if ok and expires_on >= date.today():
+        conn.execute("UPDATE profile_fact SET valid_until = %s, confirmed_at = now()::date, updated_at = now() WHERE id = %s", (expires_on, fact_id))
+    return {"evidence_file_id": eid, "verified": ok, "verdicts": verdicts_using(conn, [fact_id])}
+
+
+def human_verify(conn: psycopg.Connection, fact_id: int, user: str) -> int:
+    """A person looked at the file and agrees. Recorded separately: automatic checks never set this."""
+    n = conn.execute("""UPDATE fact_support SET human_verified_by = %s, human_verified_at = now()
+                        WHERE fact_id = %s AND verified""", (user, fact_id)).rowcount
+    conn.commit()
+    return n
 
 
 def facts(conn: psycopg.Connection, profile_id: int) -> list[dict]:
     return conn.execute(
         """SELECT f.*, coalesce(jsonb_agg(jsonb_build_object('evidence_file_id', s.evidence_file_id, 'filename', e.filename,
-                                          'page', s.page, 'quote', s.quote, 'verified', s.verified))
-                                FILTER (WHERE s.id IS NOT NULL), '[]') AS supports
+                                          'page', s.page, 'quote', s.quote, 'verified', s.verified,
+                                          'human_verified_by', s.human_verified_by))
+                                FILTER (WHERE s.id IS NOT NULL), '[]') AS supports,
+                  (SELECT jsonb_build_object('level', v.level, 'checks', v.checks, 'created_at', v.created_at)
+                     FROM fact_verification v WHERE v.fact_id = f.id ORDER BY v.id DESC LIMIT 1) AS verification
            FROM profile_fact f LEFT JOIN fact_support s ON s.fact_id = f.id LEFT JOIN evidence_file e ON e.id = s.evidence_file_id
            WHERE f.profile_id = %s GROUP BY f.id ORDER BY f.attribute, f.id""", (profile_id,)).fetchall()
 
@@ -101,7 +143,7 @@ def facts(conn: psycopg.Connection, profile_id: int) -> list[dict]:
 def verdicts_using(conn: psycopg.Connection, fact_ids: list[int]) -> list[int]:
     return [r["verdict_id"] for r in conn.execute(
         """SELECT DISTINCT vf.verdict_id FROM verdict_fact vf JOIN verdict v ON v.id = vf.verdict_id
-           JOIN assessment a ON a.id = v.assessment_id WHERE vf.fact_id = ANY(%s) AND NOT a.superseded""", (fact_ids,))]
+           JOIN assessment a ON a.id = v.assessment_id WHERE vf.fact_id = ANY(%s) AND a.status = 'done' AND NOT a.superseded AND NOT a.shadow""", (fact_ids,))]
 
 
 def daily_check(conn: psycopg.Connection, today: date) -> dict:

@@ -1,12 +1,16 @@
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from tenderfit.config import settings
 from tenderfit.db import connect, migrate
 from tenderfit.ingest import status as st
+
+log = logging.getLogger("tenderfit.api")
 
 
 @asynccontextmanager
@@ -20,6 +24,13 @@ app = FastAPI(title="TenderFit", lifespan=lifespan)
 
 from tenderfit.api.assessments import router  # noqa: E402
 from tenderfit.api.screens import router as screens_router  # noqa: E402
+
+
+@app.exception_handler(Exception)
+def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+    log.exception("%s %s failed", request.method, request.url.path, exc_info=exc)
+    return JSONResponse({"detail": "TenderFit hit an unexpected error. The details are in the server log."}, status_code=500)
+
 
 app.include_router(router)
 app.include_router(screens_router)

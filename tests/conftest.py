@@ -15,7 +15,9 @@ def _test_db():
         with psycopg.connect(ADMIN_URL, autocommit=True, connect_timeout=3) as admin:
             admin.execute("DROP DATABASE IF EXISTS tenderfit_test WITH (FORCE)")
             admin.execute("CREATE DATABASE tenderfit_test")
-    except psycopg.OperationalError:
+    except psycopg.OperationalError as e:
+        if os.environ.get("REQUIRE_DB") or os.environ.get("CI"):
+            pytest.fail(f"Postgres with pgvector is required here but unavailable: {e}")
         pytest.skip("Postgres not available")
     with connect(TEST_URL) as c:
         migrate(c)
@@ -25,7 +27,7 @@ def _test_db():
 @pytest.fixture
 def db(_test_db):
     with connect(_test_db) as c:
-        c.execute("TRUNCATE agent_step, change_impact, change_event, verdict_cache, lot_fact_confirmation, lot_decision, question, verdict_citation, verdict_fact, verdict, assessment, confirmation, llm_call, requirement_rejection, dependency, requirement, evidence_page, fact_support, evidence_file, profile_fact, business_profile, passage, document_ref, document, raw_release, buyer, opportunity, notice_version, lot, linked_notice, import_state, import_run, job RESTART IDENTITY CASCADE")
+        c.execute("TRUNCATE passage_edge, fact_verification, document_ref_state, verdict_condition, requirement_condition, version_preparation, agent_step, change_impact, change_event, verdict_cache, lot_fact_confirmation, lot_decision, question, verdict_citation, verdict_fact, verdict, assessment, confirmation, llm_call, requirement_rejection, dependency, requirement, evidence_page, fact_support, evidence_file, profile_fact, business_profile, passage, document_ref, document, raw_release, buyer, opportunity, notice_version, lot, linked_notice, import_state, import_run, job RESTART IDENTITY CASCADE")
         c.commit()
         yield c
 

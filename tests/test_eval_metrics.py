@@ -1,7 +1,6 @@
 import math
 
-from tenderfit.eval.metrics import (Item, blocker_recall, extraction_recall, false_blocker_rate, kappa, macro_f1,
-                                    ndcg_at_k, paired_bootstrap, precision_at_k, set_prf)
+from tenderfit.eval.metrics import Item, blocker_recall, extraction_recall, false_blocker_rate, kappa, macro_f1, ndcg_at_k, paired_bootstrap, precision_at_k, set_prf
 
 ITEMS = [
     Item("a", "mandatory", "not_met", "not_met"),
@@ -46,3 +45,17 @@ def test_paired_bootstrap_detects_a_clear_improvement():
     better = lambda u: Item(str(u), "mandatory", "met", "met")  # noqa: E731
     r = paired_bootstrap(units, lambda xs: sum(i.gold == i.pred for i in xs) / len(xs), worse, better, n=500)
     assert math.isclose(r["diff"], 0.5) and r["lo"] > 0.3
+
+
+def test_new_metrics():
+    from tenderfit.eval.metrics import false_met_rate, per_class, recall_at_k
+    items = [Item("a", "mandatory", "not_met", "met"), Item("b", "mandatory", "unknown", "unknown"), Item("c", "mandatory", "met", "met")]
+    assert false_met_rate(items) == 0.5
+    assert per_class(items)["met"] == {"precision": 0.5, "recall": 1.0, "support": 1}
+    assert recall_at_k(["x", "y", "z"], {"x", "q"}, k=2) == 0.5
+
+
+def test_bootstrap_can_resample_whole_notices():
+    units = [("n1", 1), ("n1", 1), ("n2", 0), ("n2", 0)]
+    r = paired_bootstrap(units, lambda xs: sum(xs) / len(xs), lambda u: 0, lambda u: u[1], n=200, cluster=lambda u: u[0])
+    assert r["lo"] == 0 and r["hi"] == 1, "two notices: the interval reflects two units, not four"

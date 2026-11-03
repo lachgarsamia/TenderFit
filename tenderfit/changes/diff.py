@@ -30,6 +30,7 @@ class Change:
     documents: list[dict] = field(default_factory=list)  # {"kind": added|removed|replaced|unreadable, "label", "essential"}
     cls: str = "local"
     reasons: list[str] = field(default_factory=list)
+    document_ref_ids: set[int] = field(default_factory=set)  # references to changed documents, in the old version
 
     @property
     def changed_passages(self) -> set[int]:

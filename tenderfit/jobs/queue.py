@@ -14,9 +14,21 @@ def enqueue(conn: psycopg.Connection, kind: str, payload: dict | None = None, lo
     ).fetchone()["id"]
 
 
+def enqueue_unique(conn: psycopg.Connection, kind: str, payload: dict, keys: tuple[str, ...], lock_key: str | None = None) -> int:
+    """Reuse a job that is still waiting for the same target. A running job is not reused: it may predate this change."""
+    match = {k: payload[k] for k in keys}
+    existing = conn.execute("SELECT id FROM job WHERE kind = %s AND status = 'queued' AND payload @> %s ORDER BY id LIMIT 1",
+                            (kind, Jsonb(match))).fetchone()
+    return existing["id"] if existing else enqueue(conn, kind, payload, lock_key)
+
+
 def claim(conn: psycopg.Connection) -> dict | None:
+    # A job whose worker died is retried only while it has attempts left; otherwise it is closed as failed.
     conn.execute(
-        "UPDATE job SET status = 'queued', locked_at = NULL WHERE status = 'running' AND locked_at < now() - %s",
+        """UPDATE job SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END, locked_at = NULL,
+                  last_error = coalesce(last_error, 'worker stopped while running this job'),
+                  finished_at = CASE WHEN attempts >= max_attempts THEN now() END
+           WHERE status = 'running' AND locked_at < now() - %s""",
         (STALE_AFTER,),
     )
     job = conn.execute(

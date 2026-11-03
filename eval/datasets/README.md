@@ -23,5 +23,5 @@ returned them) and document files (`docs/`). Open notices are frozen as snapshot
 Two annotators label independently; agreement is reported with
 `python -m tenderfit.eval kappa a/gold.json b/gold.json`.
 
-Run: `python -m tenderfit.eval run eval/datasets/<name> --configs B1,B2,B3,B4,B4-full [--live]`.
+Run: `python -m tenderfit.eval run eval/datasets/<name> --configs B0,B1,B2,B3,B4,B5,B5-full [--live]`.
 Without `--live` only recorded model responses are used (`eval/recordings/`).

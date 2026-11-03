@@ -7,7 +7,6 @@ import httpx
 from tenderfit.assessment.pipeline import assess_lot
 from tenderfit.documents import service
 from tenderfit.ingest.importer import run_import
-from tenderfit.profile import service as profiles
 from tenderfit.profile.seed import seed
 from tests import northfield
 from tests.fakes import ScriptedLLM, passage_id
@@ -54,7 +53,7 @@ def extraction(role, user, schema):
 
 
 def facts_in(user):
-    return json.loads(user.split("validity):\n", 1)[1].split("\n\nPassages:", 1)[0])
+    return json.loads(re.split(r"\n\n(?:Passages:|User answers)", user.split("validity):\n", 1)[1], maxsplit=1)[0])
 
 
 def verdicts(role, user, schema):

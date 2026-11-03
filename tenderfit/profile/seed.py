@@ -46,7 +46,7 @@ def seed_atlas(conn) -> int:
     ps.add_fact(conn, pid, "region", "Yorkshire & Humber, North West, East Midlands",
                 {"itl": ["UKE", "UKD", "UKF"], "names": ["Yorkshire and the Humber", "North West", "East Midlands"]},
                 "declared", "declared", confirmed_at=date(2026, 1, 15))
-    ps.add_fact(conn, pid, "capacity", "Up to 300 desks within 45 days", {"max_units": 300, "lead_days": 45},
+    ps.add_fact(conn, pid, "capacity", "Up to 300 desks within 45 days", {"max_units": 300, "lead_days": 45, "scope": "desks"},
                 "declared", "declared, confirmed by operations", confirmed_at=date(2026, 10, 2), confirm_by=date(2026, 11, 1))
     ps.add_fact(conn, pid, "experience", "School contract, 2024 - 180 desks supplied and installed",
                 {"description": "School desks supplied and installed", "units": 180, "end": "2024-08-30",
@@ -82,7 +82,7 @@ def seed_pennine(conn) -> int:
                   f"Product code {code}. Upholstered seating for education and offices.")
     ps.add_fact(conn, pid, "region", "Yorkshire & Humber", {"itl": ["UKE"], "names": ["Yorkshire and the Humber"]},
                 "declared", "declared", confirmed_at=date(2026, 3, 1))
-    ps.add_fact(conn, pid, "capacity", "Up to 500 chairs within 30 days", {"max_units": 500, "lead_days": 30},
+    ps.add_fact(conn, pid, "capacity", "Up to 500 chairs within 30 days", {"max_units": 500, "lead_days": 30, "scope": "chairs"},
                 "declared", "declared", confirmed_at=date(2026, 10, 20))
     iso = ps.add_fact(conn, pid, "certificate", "ISO 9001 certificate", {"standard": "ISO 9001"}, "declared", "file")
     _evidence(conn, pid, "certificate", "iso9001.pdf", "ISO 9001:2015 certificate (fictional)",

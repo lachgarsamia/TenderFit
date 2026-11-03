@@ -52,7 +52,7 @@ def test_experience_window_uses_deadline_parameter_and_needs_reference():
     r = ev(cond, "experience")
     assert r.status == NEEDS and r.needs_human == "G2" and r.facts == [2] and "notice.deadline" in r.params
     later = ev(cond, "experience", ctx(deadline=date(2027, 9, 30)))
-    assert later.status == NOT_MET
+    assert later.status == NEEDS, "a contract list is not exhaustive: what it omits is not contrary evidence"
 
 
 def test_missing_test_report_is_unknown_not_not_met():
@@ -67,12 +67,12 @@ def test_no_fact_at_all_is_unknown():
 
 def test_installation_met_on_declared_and_insurance_met_on_documents():
     assert ev({"kind": "has_evidence", "fact": "service", "match": "installation"}).status == MET
-    r = ev({"kind": "min_amount", "fact": "insurance.amount_gbp", "bound": 5_000_000}, "insurance")
+    r = ev({"kind": "min_amount", "fact": "insurance.amount_gbp", "bound": 5_000_000, "qualifier": "public liability"}, "insurance")
     assert r.status == MET and r.basis == "documents"
 
 
 def test_insurance_expiring_before_deadline_needs_confirmation():
-    r = ev({"kind": "min_amount", "fact": "insurance.amount_gbp", "bound": 5_000_000}, "insurance", ctx(deadline=date(2026, 12, 5)))
+    r = ev({"kind": "min_amount", "fact": "insurance.amount_gbp", "bound": 5_000_000, "qualifier": "public liability"}, "insurance", ctx(deadline=date(2026, 12, 5)))
     assert r.status == NEEDS and r.question
 
 
@@ -114,3 +114,10 @@ def test_relevance_levels():
     assert relevance(["39160000"], ["39160000"], ["UKE"], ["UKE"])["level"] == "strong"
     assert relevance(["39160000"], ["39110000"], ["UKE"], ["UKE"])["level"] == "partial"
     assert relevance(["33192000"], ["39160000"], ["UKE"], ["UKE"])["level"] == "low"
+
+
+def test_rejected_mandatory_requirements_rule_out_no_blocker():
+    d = dimensions([v(MET)], [NOTICE, SPEC], {"level": "strong", "detail": ""}, "complete", rejected_mandatory=2)
+    assert d.eligibility["state"] == "needs_confirmation" and d.recommendation.startswith("Relevant: 2 items need confirmation")
+    assert "not accepted from extraction" in d.eligibility["detail"]
+    assert dimensions([v(MET)], [NOTICE, SPEC], {"level": "strong", "detail": ""}, "complete").eligibility["state"] == "no_blocker"

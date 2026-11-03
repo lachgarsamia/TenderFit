@@ -2,12 +2,13 @@ name: tenderfit
 services:
   db:
     image: pgvector/pgvector:pg16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-tenderfit}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tenderfit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.example to .env and set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-tenderfit}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${DB_PORT:-5433}:5432"  # local only, and not 5432, which a local Postgres often holds
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -17,29 +18,43 @@ services:
 
   api:
     build: .
+    restart: unless-stopped
     command: uvicorn tenderfit.api.main:app --host 0.0.0.0 --port 8000
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-tenderfit}:${POSTGRES_PASSWORD:-tenderfit}@db:5432/${POSTGRES_DB:-tenderfit}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tenderfit}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tenderfit}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - appdata:/data
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      retries: 12
 
   worker:
     build: .
+    restart: unless-stopped
     command: python -m tenderfit.jobs.worker
     env_file: .env
     volumes:
       - appdata:/data
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-tenderfit}:${POSTGRES_PASSWORD:-tenderfit}@db:5432/${POSTGRES_DB:-tenderfit}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tenderfit}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tenderfit}
     depends_on:
       db:
         condition: service_healthy
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"
+    depends_on:
+      - api
 
 volumes:
   pgdata:

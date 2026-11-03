@@ -93,6 +93,7 @@ def test_profile_fact_change_reaches_verdicts_that_used_it(db, tmp_path, monkeyp
 
 def test_changes_endpoint_and_profile_change(db, _test_db, tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
+
     from tenderfit.api.main import app
     from tenderfit.changes.apply import apply_profile_change
     monkeypatch.setattr("tenderfit.config.settings.database_url", _test_db)

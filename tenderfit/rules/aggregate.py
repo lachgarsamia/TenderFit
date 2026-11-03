@@ -63,8 +63,12 @@ def relevance(lot_cpv: list[str], product_cpv: list[str], lot_regions: list[str]
     return {"level": "low", "detail": "products not in your profile"}
 
 
-def dimensions(verdicts: list[V], refs: list[Ref], rel: dict, coverage: str) -> Dimensions:
+def dimensions(verdicts: list[V], refs: list[Ref], rel: dict, coverage: str, rejected_mandatory: int = 0) -> Dimensions:
+    """rejected_mandatory: mandatory requirements extraction proposed but checks refused. They were not assessed, so they
+    rule out saying nothing stands in the way."""
     elig, items = eligibility(verdicts, refs)
+    if elig == "no_blocker" and rejected_mandatory:
+        elig = "needs_confirmation"
     docs = [r for r in refs if r.kind != "notice" and r.essential]
     read = sum(r.status in ("read", "confirmed_none") for r in docs)
     mand = [v for v in verdicts if v.obligation == "mandatory"]
@@ -79,6 +83,8 @@ def dimensions(verdicts: list[V], refs: list[Ref], rel: dict, coverage: str) -> 
     else:
         label = "No blocker found"
         detail = f"{met} of {len(mand)} met" + (f" · {len(items)} to confirm" if items else "")
+        if rejected_mandatory:
+            detail += f" · {rejected_mandatory} not accepted from extraction; check them yourself"
     gaps = [v for v in verdicts if v.status in (NEEDS, UNKNOWN) and v.category in
             ("certificate", "standard", "experience", "insurance", "financial")]
     feas = [v for v in verdicts if v.category in ("quantity", "delivery")]
@@ -102,7 +108,8 @@ def dimensions(verdicts: list[V], refs: list[Ref], rel: dict, coverage: str) -> 
     elif elig == "provisional":
         rec = f"Provisional: no blocker found in documents read ({read} of {len(docs)})"
     elif elig == "needs_confirmation":
-        rec = f"Relevant: {len(items)} item{'s' if len(items) != 1 else ''} need confirmation before you bid"
+        n = len(items) + rejected_mandatory
+        rec = f"Relevant: {n} item{'s' if n != 1 else ''} need confirmation before you bid"
     else:
         rec = "Relevant: no mandatory blocker found"
     return Dimensions(

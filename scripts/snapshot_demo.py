@@ -6,9 +6,6 @@ from pathlib import Path
 
 import httpx
 
-REGION = {"UKC": "North East", "UKD": "North West", "UKE": "Yorkshire & Humber", "UKF": "East Midlands", "UKI": "London",
-          "UKJ": "South East"}
-
 
 def main(base: str) -> None:
     h = httpx.Client(base_url=base, timeout=120)
@@ -27,27 +24,29 @@ def main(base: str) -> None:
     lots: set[int] = set()
     for p in profiles:
         pid = p["id"]
-        q = "Furniture tenders we could deliver in " + ", ".join(REGION.get(r, r) for r in p["regions"])
-        res = h.post("/search", json={"q": q, "profile_id": pid, "limit": 40}).json()
+        res = h.post("/search", json={"q": "", "profile_id": pid, "limit": 40}).json()
         snap[f"POST /search?profile_id={pid}"] = res
         lots |= {l["id"] for o in res["shortlist"] for l in o["lots"]}
+        for o in res["shortlist"] + res["no_longer_open"]:
+            get(f"/tenders/{o['id']}?profile_id={pid}")
         for path in (f"/changes?profile_id={pid}", f"/profile/facts?profile_id={pid}", f"/profiles/{pid}/evidence-impact",
                      f"/profiles/{pid}/pursued"):
             get(path)
         for c in snap[f"/changes?profile_id={pid}"]:
             lots |= {i["lot_id"] for i in c["impacts"]}
     for lot in sorted(lots):
-        inv = get(f"/lots/{lot}/documents")
-        for d in inv["documents"]:
-            if d["kind"] == "notice" and d["url"] and "Notice/0" in d["url"] and any(
-                    o["fictional"] for k, v in snap.items() if k.startswith("POST /search") for o in v["shortlist"]
-                    if any(l["id"] == lot for l in o["lots"])):
-                d["url"] = None
+        get(f"/lots/{lot}")
         for p in profiles:
+            inv = get(f"/lots/{lot}/documents?profile_id={p['id']}")
+            for d in inv["documents"]:
+                if d["kind"] == "notice" and d["url"] and "Notice/0" in d["url"] and any(
+                        o["fictional"] for k, v in snap.items() if k.startswith("POST /search") for o in v["shortlist"]
+                        if any(l["id"] == lot for l in o["lots"])):
+                    d["url"] = None
             a = get(f"/lots/{lot}/assessment?profile_id={p['id']}", required=False)
             if a and a.get("fictional_notice") and a.get("version"):
                 a["version"]["source_url"] = None
-            if a:
+            if a and a.get("assessment_id"):
                 get(f"/lots/{lot}/preparation?profile_id={p['id']}")
     out = Path("web/demo/snapshot.json")
     out.parent.mkdir(exist_ok=True)

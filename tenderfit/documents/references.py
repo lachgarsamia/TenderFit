@@ -3,7 +3,8 @@ from dataclasses import dataclass
 
 CUE = r"(?:see|refer to|referred to in|as set out in|set out in|in accordance with|as described in|detailed in|specified in|defined in|using|per)"
 SECTION = re.compile(r"\b(?:section|clause|paragraph|para\.?)\s+(\d{1,2}(?:\.\d{1,2}){0,3})\b", re.I)
-PART = re.compile(r"\b(appendix|annex|annexe|schedule|attachment|lot)\s+([A-Z]{1,2}|\d{1,2})\b", re.I)
+# The name may be any case, but the identifier must be a capital or a number: "schedule of rates" is not a Schedule "OF".
+PART = re.compile(r"\b((?i:appendix|annex|annexe|schedule|attachment|lot))\s+([A-Z]{1,2}|\d{1,2})\b")
 NAMED = re.compile(
     r"\b(?:the\s+)?(instructions? to (?:tenderers|bidders)|invitation to tender|specification|"
     r"pricing (?:schedule|document)|price schedule|form of tender|selection questionnaire|"

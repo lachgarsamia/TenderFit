@@ -30,10 +30,13 @@ export async function api<T = any>(path: string, init?: RequestInit): Promise<T>
   return r.json();
 }
 
+export const fileUrl = (documentId: number, profileId: number) => `/api/documents/${documentId}/file?profile_id=${profileId}`;
+
 export const post = <T = any>(path: string, body: unknown) => api<T>(path, { method: "POST", body: JSON.stringify(body) });
 
 export async function waitForJobs(ids: number[], onTick?: () => void): Promise<void> {
-  for (let i = 0; i < 120 && ids.length; i++) {
+  if (!ids.length) return;
+  for (let i = 0; i < 400; i++) {
     await new Promise((r) => setTimeout(r, 1500));
     const jobs = await Promise.all(ids.map((id) => api(`/jobs/${id}`)));
     onTick?.();
@@ -43,6 +46,7 @@ export async function waitForJobs(ids: number[], onTick?: () => void): Promise<v
       return;
     }
   }
+  throw new Error("This is taking longer than expected. It is still running; check back in a few minutes.");
 }
 
 export function fmtDate(d?: string | null, withTime = true): string {

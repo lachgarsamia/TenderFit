@@ -1,0 +1,13 @@
+.git
+.venv
+.env
+.env.*
+web/node_modules
+web/dist
+web/dist-demo
+data
+eval/work
+eval/recordings
+eval/reports
+**/__pycache__
+.claude

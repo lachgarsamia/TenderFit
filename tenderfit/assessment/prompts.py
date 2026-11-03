@@ -2,7 +2,7 @@ import json
 
 from tenderfit.llm import UNTRUSTED_RULE, untrusted
 
-VERDICT_VERSION = "verdict-v1"
+VERDICT_VERSION = "verdict-v2"
 
 VERDICT_SYSTEM = f"""You judge whether a supplier meets one requirement of a UK public tender, using only the passages
 and profile facts given. TenderFit recommends; a person decides.
@@ -39,7 +39,7 @@ VERDICT_SCHEMA = {
 
 
 def verdict_user(req: dict, passages: list[dict], facts: list[dict], today: str, deadline: str | None,
-                 answers: list[str] | None = None) -> str:
+                 answers: list[str] | None = None, open_conditions: list[str] | None = None) -> str:
     ps = "\n\n".join(untrusted("tender_passage", p["text"], id=p["id"], document=p["document"],
                                section=p["section"] or "", page=p["page"] or "") for p in passages)
     fs = json.dumps(facts, default=str, indent=1)
@@ -48,6 +48,9 @@ def verdict_user(req: dict, passages: list[dict], facts: list[dict], today: str,
             f"Source quote: \"{req['quote']}\" (passage {req['passage_id']})\n"
             f"Equivalent allowed: {req['equivalent_allowed']}. Evidence the buyer asks for: "
             f"{', '.join(req['evidence_needed']) or 'not stated'}.\n\n"
+            + ("Judge only these parts of the requirement; the others were checked by rule:\n"
+               + "\n".join(f"- {c}" for c in open_conditions) + "\n\n" if open_conditions else "")
+            +
             f"Supplier profile facts (with evidence status and validity):\n{fs}\n\n"
             + ("User answers to earlier questions (declared by the user, not proof):\n"
                + "\n".join(untrusted("evidence", a, kind="user_answer") for a in answers) + "\n\n" if answers else "")
