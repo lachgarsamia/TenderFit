@@ -420,6 +420,8 @@ def retry_change(change_id: int, profile_id: int = Depends(current_profile)):
 def changes(limit: int = Query(50, ge=1, le=200), profile_id: int = Depends(current_profile)):
     with connect() as conn:
         # Scope first and limit afterwards, so other suppliers' events never use up this supplier's page.
+        # A version change stays listed for anyone who assessed the old version, even with no impact: a re-check can
+        # reach the new version before the change is processed, and the amendment must not then vanish.
         events = conn.execute(
             """SELECT c.*, o.title AS opportunity, b.name AS buyer, fv.published_at AS from_published, tv.published_at AS to_published,
                       fv.release_id AS from_release, tv.release_id AS to_release,
@@ -430,7 +432,7 @@ def changes(limit: int = Query(50, ge=1, le=200), profile_id: int = Depends(curr
                LEFT JOIN notice_version_numbered tn ON tn.id = c.to_version_id
                WHERE (c.kind = 'profile' AND (c.summary->>'profile_id')::bigint = %(p)s)
                   OR EXISTS (SELECT 1 FROM change_impact i WHERE i.change_id = c.id AND i.profile_id = %(p)s)
-                  OR (c.kind = 'version' AND c.status <> 'applied' AND EXISTS (
+                  OR (c.kind = 'version' AND EXISTS (
                         SELECT 1 FROM assessment a WHERE a.version_id = c.from_version_id AND a.profile_id = %(p)s AND a.status = 'done'))
                   OR (c.kind = 'status' AND EXISTS (
                         SELECT 1 FROM assessment a JOIN lot l ON l.id = a.lot_id

@@ -18,11 +18,19 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
 docker compose -f docker-compose.yml -f docker-compose.demo.yml exec api python -m tenderfit.demo load
 ```
 
-The first load downloads the embedding and reranking models, so run it before the meeting. Open http://localhost:8080. To start again:
+The first load downloads the embedding and reranking models, so run it before the meeting. Open http://localhost:8080 and sign in as `brightwell@demo.test` or `oakline@demo.test`. The shared password is the `DEMO_PASSWORD` constant in `tenderfit/demo/__main__.py`. Those accounts exist only because of `demo load`, which refuses to run outside demo mode. Set `DEMO_PASSWORD` to choose your own.
+
+To start again, remove the tender and load it:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.demo.yml exec api python -m tenderfit.demo reset
 ```
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.demo.yml exec api python -m tenderfit.demo load
+```
+
+A short version of this script is in [PROFESSOR_DEMO.md](PROFESSOR_DEMO.md).
 
 ## Script (about 15 minutes)
 
@@ -30,7 +38,7 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml exec api python 
 A supplier reads a long pack across several documents to answer one question: can we bid, and what stands in the way? Keyword matching finds tenders; it cannot say whether "£5m employers' liability" is met by a £10m public liability policy.
 
 ### 2. Opportunities (1 min)
-Open **Opportunities**, workspace Brightwell. The list is matched to the supplier's own products and regions, with a reason per lot. Open the tender.
+Sign in as Brightwell and open **Opportunities**. The list is matched to the supplier's own products and regions, with a reason per lot. Open the tender.
 
 *Point out:* the tender page lists both lots, the documents, and which were readable.
 
@@ -85,7 +93,7 @@ Press **Retry now** on Changes, and wait a few seconds. Then show:
 Lot 1's recommendation moves from *Blocker found* to *Relevant: needs confirmation*.
 
 ### 10. Supplier isolation (1 min)
-Switch the workspace to **Oakline**. The ITT is *not read* for Oakline, because Brightwell's copy is private to Brightwell, and Oakline has no requirements from it.
+Sign out, and sign in as **Oakline**. The ITT is *not read* for Oakline, because Brightwell's copy is private to Brightwell, and Oakline has no requirements from it.
 
 ### 11. Evidence behind the claim (1 min)
 ```bash

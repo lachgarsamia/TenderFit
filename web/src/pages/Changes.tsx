@@ -92,6 +92,9 @@ export default function Changes() {
             {ev?.kind === "profile" && <Card title="A fact in your profile changed"><div>{ev.reasons.join("; ")}</div></Card>}
             {ev?.kind === "status" && <Card title={`${ev.buyer} · ${ev.opportunity}`}><div className="status-bad">{ev.reasons.join("; ")}</div>
               <p className="small muted">Removed from your shortlist; the earlier assessment is archived.</p></Card>}
+            {ev?.kind === "version" && ev.status === "applied" && !ev.impacts?.length && <Card title="Effect on your assessment">
+              <p className="small muted" style={{ margin: 0 }}>Your assessment was re-run on the new version before this change was compared, so there is no before-and-after here. Open the lot to see the current result.</p>
+            </Card>}
             {ev?.impacts?.map((imp: any) => <Card key={imp.id} title={`Effect on Lot ${imp.lot_no}${imp.lot_title ? ` · ${imp.lot_title}` : ""}`}
                 note={imp.mode === "targeted" ? `${imp.affected.length} re-checked · ${imp.kept} kept` : "Everything re-checked"}>
               {imp.affected.length === 0 && <p className="small muted" style={{ marginTop: 0 }}>Nothing this lot depends on changed in its verdicts.</p>}

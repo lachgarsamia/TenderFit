@@ -215,3 +215,21 @@ def test_automatic_retry_backs_off_but_a_direct_retry_does_not(world):
     db.execute("UPDATE change_event SET finished_at = now() - interval '3 minutes'")
     db.commit()
     assert pending_version_changes(db, respect_backoff=True), "after the pause it is picked up again"
+
+
+def test_a_recheck_that_reached_the_new_version_first_neither_hides_nor_strands_the_amendment(world, monkeypatch):
+    db, lots, ids, llm = world
+    pid = ids["Atlas Furniture"]
+    amend(db, "029400-2026", 12, "https://portal.test/Spec_Desks_v2.pdf")
+    real = changes.pair_requirements
+    monkeypatch.setattr(changes, "pair_requirements", lambda *a, **k: (_ for _ in ()).throw(LLMError("provider down")))
+    with pytest.raises(ChangeProcessingError):
+        process_pending(db, llm, http=portal(V2), **KW)
+    monkeypatch.setattr(changes, "pair_requirements", real)
+    assess_lot(db, lots["1"], pid, llm, http=portal(V2), **KW)  # a fact edit's job, running after the failure
+    with as_supplier(db, pid) as c:
+        ev = next(e for e in c.get("/changes").json() if e["kind"] == "version")
+        assert ev["status"] == "failed"
+        assert c.post(f"/changes/{ev['id']}/retry").status_code == 200
+        process_pending(db, llm, http=portal(V2), **KW)
+        assert next(e for e in c.get("/changes").json() if e["kind"] == "version")["status"] == "applied"

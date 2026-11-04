@@ -196,6 +196,7 @@ export default function Profile() {
       const ok = renew ? out.verified : out.support_verified;
       if (!ok) { setFormError(renew ? "The file did not back this up: the sentence was not found on that page, or the file contradicts the fact." : "That sentence is not on that page, or the file contradicts the fact, so the fact was not marked as proven."); await load(); return; }
       setDialog(null); setToast(out.jobs?.length ? "Saved. Re-checking affected tenders…" : "Evidence checked and added.");
+      await load();
       if (out.jobs?.length) await waitForJobs(out.jobs);
       await load(); setToast("Evidence checked and added.");
     } catch (e: any) { setFormError(e.message); } finally { setBusy(false); }

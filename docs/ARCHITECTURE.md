@@ -131,6 +131,10 @@ erDiagram
 
 Migrations are numbered SQL files applied in order: 001 to 016.
 
+**Identity:** `tenderfit/auth` holds accounts (Argon2id), sessions (random tokens stored only as SHA-256) and membership. `tenderfit/api/deps.py` derives the user and active supplier for each request and re-checks membership each time; no route takes a supplier or user from the client. Another supplier's resource returns 404. State-changing requests need an `X-TenderFit` header, which a cross-site form cannot send. Workers run as the supplier named on the job, set by the API from the session.
+
+**Replay:** `replay` is non-destructive. `destructive_rebuild` is reachable only from the command line with two explicit flags and the exact database name; no API route or worker job reaches it.
+
 **Isolation:** public tender data has no owner. A supplier's uploads, requirements extracted from them, and decisions about documents carry `owner_profile_id` or live in `document_ref_state`. Search, graph expansion, inventory, assessment and source viewing all filter on it.
 
 ## Guarantees and the tests behind them

@@ -1,18 +1,161 @@
-# Human validation package
+# Validation report
 
-**Status: awaiting your review. Nothing has been committed, pushed, merged, deployed or published.** All changes are uncommitted in the working tree on `main`, which is the branch you chose.
+**Status: awaiting human review. Nothing has been pushed, merged or deployed.**
 
-## A. Executive summary
+| | |
+|---|---|
+| Branch | `release-hardening` (local only) |
+| Based on | `origin/main` at `2b0bce3` |
+| Code tested | The tip of this branch; `git log -1` gives the commit. Documents were the only later change |
+| Date | 4 November 2026 |
 
-**The failures the audit found are fixed and covered by tests.** Failed runs no longer lose results or amendments, the known false verdicts are gone, invented numbers cannot become rule inputs, and suppliers cannot influence each other's assessments.
+## Summary
 
-**New capabilities work as mechanisms:** decomposed conditions, reference-following retrieval, contradiction detection, evidence checks, per-verdict dependencies, a redesigned interface and a reproducible demo.
+**Release recommendation: ready for your code review. Not ready for production, and not ready for real supplier data without the review and the decisions below.** Authentication, authorization and isolation are implemented and tested locally, but have had no independent review. No real model has been run on real tenders here, because no API key was available, so **accuracy is unmeasured.**
 
-**The most important limit:** no real model has been run on real tenders in this work, because no API key was available. All verdict tests and the demo use scripted model answers. **This work shows the system behaves correctly around the model. It does not show how accurate it is.** Please present it that way.
+Changes: accounts and session-derived supplier identity; non-destructive replay; page-level PDF status; supplier onboarding; a typed data layer; a hardened CI workflow; and API versioning under `/v1`. See [CHANGELOG.md](../CHANGELOG.md).
 
-Two gaps remain before any real supplier data: there is no authentication, and no way to create a profile or fact.
+## Local and remote
 
-## B. Implementation matrix
+| Check | Local | On GitHub |
+|---|---|---|
+| Backend tests, ruff, mypy | Verified | **Pending** |
+| Migrations on an empty database, twice | Verified | **Pending** |
+| Frontend type check, tests, build | Verified | **Pending** |
+| Secret scan of history and tree | Verified | **Pending** |
+| Compose config | Verified | **Pending** |
+| Workflow file | Passes `actionlint`, **never executed** | **Pending** |
+| `pip install -e '.[dev]'` from nothing, with Linux runners | **Not replicated.** Docker images install runtime dependencies from nothing; `mypy` was added to the dev list and comes from the existing environment locally | **Pending** |
+
+## Test results
+
+| Suite | Tests | Passed | Failed | Skipped |
+|---|---|---|---|---|
+| Backend (`scripts/test.sh`, `REQUIRE_DB=1`) | 349 | 349 | 0 | 0 |
+| Frontend (Vitest, stubbed server) | 14 | 14 | 0 | 0 |
+
+The skip count comes from the JUnit report, not just the console. **All verdict tests use scripted model answers.** Frontend tests do not talk to a real server.
+
+**Browser walkthrough, one-off script** (not in the repository or CI), on the Compose demo in a headless Chromium browser: 21 of 21 checks and then 5 of 5 on evidence flows. Those checks found one real defect, listed below. The only console errors logged were the failed-request lines for the `401`, `403` and `404` responses the walkthrough provokes on purpose. Screenshots are real captures from these runs, in [screenshots/](screenshots/).
+
+### Required coverage
+
+| Requirement | Where |
+|---|---|
+| A reads B's profile, evidence | `test_isolation.py::test_every_fact_and_evidence_route_refuses_another_supplier`, `test_a_file_of_one_supplier_cannot_prove_anothers_fact` |
+| A triggers B's assessment | `test_a_client_supplied_profile_id_is_ignored`, `test_assessment_history_jobs_and_trace_are_scoped` |
+| LLM context leakage | `test_a_suppliers_answer_never_reaches_another_suppliers_prompt`, `test_private_text_stays_out_of_retrieval_and_prompts_for_others` |
+| Cross-profile amendments | `test_amendment_events_and_retries_are_scoped`, `test_cross_profile_amendment_processing_keeps_each_suppliers_decisions` |
+| Unauthorized jobs and assessments | `test_auth.py`, `test_assessment_history_jobs_and_trace_are_scoped` |
+| Replay refuses, preserves | `test_replay_safety.py` |
+| Fresh and upgrade migration | `test_migrations.py`, [MIGRATION_VALIDATION.md](MIGRATION_VALIDATION.md) |
+| Page-level and mixed PDFs | `test_pdf_pages.py` |
+| Expired evidence renewal | `test_soundness.py::test_expired_fact_can_be_renewed_and_triggers_reassessment` |
+| Lifecycle, failed retry | `test_assessment_lifecycle.py`, `test_amendment_retry.py` |
+| API compatibility, validation | `test_api_contract.py`, `test_demo_and_api.py` |
+| Rule-engine cases | `test_rules.py`, `test_rules_regression.py`, `test_soundness.py` |
+| Frontend navigation and errors | `web/src/test/app.test.tsx` |
+
+## Security audit
+
+**Fixed and tested:** the supplier comes from the session on every route; `profile_id` and `user` cannot be supplied by a client (`test_no_route_accepts_a_supplier_or_user_from_the_client`); another supplier's resources return 404; `401` without a session; `403` without the `X-TenderFit` header; passwords use Argon2id and session tokens are stored only as hashes; sign-in lockout; open sign-up off by default; a job acts only on its named supplier's facts; destructive replay is unreachable from the API and worker.
+
+**Open:** see [LIMITATIONS.md](LIMITATIONS.md). The important ones: no independent review, no password reset, no account disabling command, rate limiting on sign-in only, no TLS in Compose, and uploads made before migration 014 remain public.
+
+**Dependencies:** `pip-audit` on the installed Python environment found no known vulnerabilities. `npm audit` after upgrades: production `react-router` moderate advisories needing a major upgrade; development-only advisories in `vitest` and `vite`, some rated critical. See LIMITATIONS.
+
+## Secret scan
+
+Gitleaks 8.18.4 (`scripts/secret_scan.sh`), findings redacted.
+
+| Target | Raw findings | Outside dependencies and caches |
+|---|---|---|
+| Whole Git history | 0 | **0** |
+| Working tree | 20 | **0** |
+
+The 20 are in `node_modules`, `.venv` and caches, all git-ignored. Manual review: `.env` is ignored and holds placeholders with an empty API key. `.env.example` holds placeholders. `.gitignore` and `.dockerignore` cover `.env`, data, build output and caches. No secret needed rotating. Known deliberate values, neither a secret: the local default connection string in `tenderfit/config.py`, and the published demo password. CI's database password is a throwaway service container's.
+
+## CI
+
+The workflow runs ruff, mypy, migrations on an empty database (twice), the full suite with a required database and a failure on any skip, the frontend type check, tests and build, a full-history secret scan, and Compose validation. There is no frontend linter. **It has never run on GitHub.** No secrets are referenced or needed.
+
+## Database migrations
+
+18 migrations. Fresh, repeated, upgrade from `2b0bce3` with data preserved, failure rollback, backup and restore: all pass. Forward-only. Full report: [MIGRATION_VALIDATION.md](MIGRATION_VALIDATION.md).
+
+## API compatibility
+
+**Breaking for every client except `/health`.** Full table, migration path and versioning: [API_MIGRATION.md](API_MIGRATION.md). The frontend, tests and snapshot script have moved. Contract: [openapi.json](openapi.json).
+
+## PDF processing
+
+Each page is `text`, `needs_ocr` or `blank`. Tested with generated fixtures: all text, all scanned, mixed, blank pages, corrupted files, page references kept, originals preserved. A mixed document is `partial`, names its pages in the interface, and no blocker is claimed from it. **No OCR is performed.** Not tested on a corpus of real tender PDFs.
+
+## Type checking
+
+`mypy` default mode: **0 errors, 0 `type: ignore` comments** across 66 files.
+
+| State | Errors | |
+|---|---|---|
+| `main` at `2b0bce3`, same settings | 333 | Pre-existing |
+| This work, midway | 473 | About 140 new, mostly `[call-overload]` from untyped connection rows in new code |
+| Now | 0 | Fixed with a `Conn` type and a `must()` helper for rows |
+
+Remaining debt: not `--strict`, `ignore_missing_imports` on, JSON stays `dict[str, Any]`, frontend responses are mostly `any`.
+
+## Known defects
+
+**Found and fixed in this pass:** an amendment could vanish from Changes, or stick on "Waiting to be processed", if a re-check reached the new version first (`test_a_recheck_that_reached_the_new_version_first_neither_hides_nor_strands_the_amendment`).
+
+**Remaining:**
+- If that same race happens before the event is created, and no other supplier is behind, no event is shown. The current result is correct. See LIMITATIONS.
+- Facts added by hand trigger a full re-assessment of assessed lots, using model budget within the per-lot caps.
+- 40 foreign keys lack an index. See the migration report.
+- Rest of LIMITATIONS.md.
+
+## Exact commands
+
+```bash
+bash scripts/test.sh
+```
+
+```bash
+.venv/bin/ruff check tenderfit tests scripts
+```
+
+```bash
+.venv/bin/mypy
+```
+
+```bash
+cd web && npm ci && npm run typecheck && npm test && npm run build
+```
+
+```bash
+bash scripts/secret_scan.sh
+```
+
+```bash
+docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:1.7.7
+```
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.demo.yml config -q
+```
+
+```bash
+DATABASE_URL=postgresql://tenderfit:tenderfit@127.0.0.1:55432/postgres .venv/bin/python -m tenderfit.eval regression
+```
+
+```bash
+.venv/bin/python scripts/snapshot_demo.py && .venv/bin/python scripts/build_demo.py
+```
+
+## Earlier iteration, also on this branch
+
+These results are from the previous work and were not all re-examined here, though their tests are in the suite above.
+
+### Implementation matrix
 
 | Milestone | Status | Notes |
 |---|---|---|
@@ -35,21 +178,7 @@ Two gaps remain before any real supplier data: there is no authentication, and n
 | **M10** Evaluation | Partially implemented | Harness and metadata done. The B0-B5 comparison is prepared but **has not been run** on a real model. Some metrics need labels that do not exist |
 | **Demo and docs** | Implemented and tested | Run from empty volumes through Compose |
 
-## C. Architecture changes
-
-Diagrams are in [ARCHITECTURE.md](ARCHITECTURE.md). In short:
-
-- **Assessment runs** hold the old result current until the new one commits, in one transaction.
-- **Amendments** are a state machine with a durable preparation marker and a processing lock.
-- **New modules:** `extraction/validate.py`, `retrieval/graph.py`, `assessment/contradiction.py`, `profile/verify.py`, `demo/`, `eval/regression.py`.
-- **New frontend:** tender page, source dialog, progress banner, error boundary, evidence form.
-- **New services:** none. No new database, and no multi-agent design.
-
-Six migrations, 011 to 016. Fresh install and upgrade from 010 are both tested.
-
-**API changes you should know about:** `profile_id` is now required on confirmations, answers, supplier uploads, fact edits and the trace endpoint. `GET /lots/{id}/assessment` adds `processing`, `last_failure`, `rejections` and `lots`, and can return `assessment_id: null` with a failure. The frontend and tests are updated.
-
-## D. AI assessment improvements
+### AI assessment changes
 
 | Area | What actually changed | What it is not |
 |---|---|---|
@@ -63,7 +192,7 @@ Six migrations, 011 to 016. Fresh install and upgrade from 010 are both tested.
 | Agent | Evidence tool, supplier scoping, conflict flag | Value unmeasured |
 | Dependencies | Per verdict; rule parameters and the implicit deadline recorded; read edges survive carry-over | Validated on synthetic edits only |
 
-### The one experiment that ran (synthetic; scripted model)
+#### The one experiment that ran (synthetic; scripted model)
 
 `python -m tenderfit.eval regression`: 8 controlled amendments, 176 verdicts compared with full reassessment.
 
@@ -76,110 +205,3 @@ Six migrations, 011 to 016. Fresh install and upgrade from 010 are both tested.
 
 The one miss is the deadline moving past an insurance expiry. **Scripted answers make this deterministic, and eight edits are not a sample of anything.** It shows the bookkeeping works and is a template for the real experiment. Both approaches reassess mostly verdicts that do not change, so targeting is conservative rather than efficient.
 
-## E. Test report
-
-Run on 2026-11-03 against PostgreSQL 16.15 with pgvector.
-
-| Command | Result |
-|---|---|
-| `bash scripts/test.sh` | **259 passed, 0 failed, 0 skipped**, 69s |
-| `.venv/bin/ruff check tenderfit tests scripts` | Passed, on a small configured rule set (E, F, I, without line length) |
-| `.venv/bin/mypy tenderfit --ignore-missing-imports` | **473 errors**, up from 333. Not configured, not enforced, not fixed |
-| `cd web && npx tsc -b` | Passed |
-| `cd web && npm run build` | Passed |
-| `docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build` from empty volumes | All 4 services up, API healthy, 16 migrations |
-| `python -m tenderfit.demo load` in the container | Passed, with the real embedding and reranking models |
-| `python -m tenderfit.demo amend --fail-first`, then Retry in the UI | Failed visibly, then applied through the real worker |
-| `python -m tenderfit.demo amend --audit` | 3 impacts; full re-check agreed on all 3 |
-| Without a database, `REQUIRE_DB=1` | Tests error, as intended |
-| Without a database, local | Tests skip, as intended |
-
-**Existing tests I changed, so you can judge them:**
-- `test_experience_window...` asserted NOT MET; it now asserts NEEDS CONFIRMATION. A contract list omitting something is not contrary evidence.
-- Two insurance tests now state the policy type, because an unstated type no longer settles by rule.
-- `test_api_assessment` uses a far-future deadline to fix the date bug, and now passes `profile_id`.
-- `test_eval_run` moved to the new arm names.
-- `facts_in` in `test_pipeline` now handles the answers section in prompts.
-
-**Not run:** any real model, the live Find a Tender import on purpose, GitHub CI, Playwright or other automated browser tests, an accessibility tool, a screen reader, the static demo build, load tests.
-
-**Manual browser checks:** Opportunities, Tender, Lot, Changes (failed, waiting, applied), Profile, source dialog, evidence form. At 375px the lot page has no horizontal page overflow; other pages were not checked at that width. Console clean in the final flow. With the API stopped, the app shows a message rather than a blank page. The Preparation page was checked through its API, not visually.
-
-## F. Security report
-
-**Done and tested:** answers scoped by profile; uploads private to the uploader; `confirmed_none` per supplier; private passages excluded from search, graph, inventory and source viewing; assessment plans read only that supplier's edges; verdict cache keyed by profile; profile and ownership checks on routes; document status cannot be set directly; upload size and type checks; SSRF checks on each redirect hop; the agent has no URL input and is read-only.
-
-**Done, not exercised by tests:** non-root containers (confirmed `uid=1000`), restart policies, local-only ports, required database password, structured 500 responses (tested).
-
-**Remaining:**
-- **No authentication or authorisation.** Isolation holds for correct callers. Anyone who can reach the API can pass any `profile_id`.
-- `user` is free text.
-- Documents are not encrypted at rest.
-- DNS rebinding between check and connection is not prevented.
-- Uploads made before migration 014 stay public, as their owner is unknown.
-
-**Decision for you:** single-supplier research tool, or multi-tenant? It decides how much authentication is needed.
-
-## G. Frontend report
-
-**Added:** tender page, all lots reachable with a lot switcher, real version labels, every affected lot shown, processing state that survives reload, failure and retry states, application error boundary, source reading with highlighted quote and open-at-page, evidence and renewal form replacing the browser prompt, verification ladder, sector-neutral search defaulting to the supplier's own products.
-
-**Requirement panel now shows:** what the tender requires, required against what you have, separately checked conditions, your facts with file and page, why this result, how it was decided (fixed rule, AI reading checked, lowered by a safeguard), what remains uncertain, the next step, and documents consulted with the reason.
-
-**Removed:** the misleading "sent for a closer look" text, and silent error catches on the affected pages.
-
-Demonstrate it with [DEMO.md](DEMO.md).
-
-## H. Professor demonstration guide
-
-[DEMO.md](DEMO.md) has the 15-minute script, expected results, talking points and likely questions. **Rehearse it once: the first load downloads models.**
-
-## I. Research opportunities
-
-[RESEARCH_ROADMAP.md](RESEARCH_ROADMAP.md) has six questions and how to test them. The strongest is whether LLM decisions can be updated incrementally with a measured miss rate. All of them need a labelled real dataset, which is the next real step.
-
-## J. Remaining issues
-
-Full list in [LIMITATIONS.md](LIMITATIONS.md). The ones that matter most:
-
-1. Accuracy on real tenders is unknown.
-2. No authentication, and no way to create profiles or facts.
-3. A scanned PDF with a text cover page still counts as read.
-4. Page furniture can make amendments look larger than they are, which is safe but costly.
-5. `replay` still destroys assessments. Not changed.
-6. Lot-level cancellation and per-tender refresh exist only in the older copy now in your Trash.
-
-**Things that happened during this work, for your awareness:**
-- A test worker made read-only requests to the public Find a Tender API, importing 575 real public notices into a throwaway database, which I then deleted. No account was involved and nothing was submitted. I added `IMPORT_ENABLED` as a result.
-- I started Docker Desktop, downloaded Python and Node packages, Docker images and the two Hugging Face models.
-- A real race between the worker and a command appeared in the final run and was fixed with a lock.
-
-## K. Human validation checklist
-
-1. **Run the demo** per [DEMO.md](DEMO.md). The stack is running now at http://localhost:8080.
-2. **Read the rule policy** in `tenderfit/rules/engine.py`. Do you agree a thin contract list gives NEEDS CONFIRMATION rather than NOT MET?
-3. **Check the migrations**, `migrations/011` to `016`, especially the repair in 011.
-4. **Run the tests:** `bash scripts/test.sh`.
-5. **Decide on authentication** (section F).
-6. **Check the API changes** in section C against anything else that calls this API.
-7. **Decide whether to commit,** as one change or split by milestone. I did not commit, as you did not ask me to.
-8. **Decide about the old copy in your Trash:** the design report, `notes/DECISIONS.md` and `CLAUDE.md` are only there. Keep them before emptying it.
-9. **Try a real model** if you have a key: remove the demo overlay, set `ANTHROPIC_API_KEY`, and assess one real tender.
-
-## L. Git status
-
-| | |
-|---|---|
-| Branch | `main` |
-| Starting commit | `2b0bce3cc29e45a049c240efa379d4124b54f05e` |
-| New commits | **None** |
-| Tracked files modified | 57 (+2,640 / −968 lines) |
-| New files | 32 (including `.github/`, `docs/`, `tenderfit/demo/`) |
-| Files deleted | None |
-| New migrations | `011_assessment_lifecycle`, `012_change_processing`, `013_requirement_conditions`, `014_supplier_isolation`, `015_retrieval_graph`, `016_evidence_verification` |
-| Tests | 259 passed, 0 failed, 0 skipped |
-| `origin/main` | Still `2b0bce3` |
-
-**Confirmed: nothing was pushed, merged, deployed, published or released.**
-
-`git status` gives the exact current list, which now also includes these reports. `.env` (placeholder values) and `.claude/launch.json` exist locally and are ignored by git.

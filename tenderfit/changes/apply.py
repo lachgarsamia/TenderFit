@@ -360,6 +360,15 @@ def process_pending(conn: Conn, llm: LLM, http=None, **assess_kw) -> list[int]:
         conn.commit()
 
 
+def _settle_overtaken(conn: Conn) -> None:
+    """A re-check can move every current assessment onto the new version while an event waits. Nothing is left to compare."""
+    conn.execute(
+        """UPDATE change_event c SET status = 'applied', last_error = NULL, finished_at = now()
+           WHERE c.kind = 'version' AND c.status IN ('detected', 'processing', 'failed') AND NOT EXISTS (
+               SELECT 1 FROM assessment a WHERE a.version_id = c.from_version_id AND a.status = 'done' AND NOT a.superseded AND NOT a.shadow)""")
+    conn.commit()
+
+
 def _process_pending(conn: Conn, llm: LLM, http, assess_kw: dict) -> list[int]:
     out, failed = [], []
     for old, new in pending_version_changes(conn):
@@ -378,6 +387,7 @@ def _process_pending(conn: Conn, llm: LLM, http, assess_kw: dict) -> list[int]:
         _finish_event(conn, cid, errors)
         if errors:
             failed.append(f"change {cid}: {errors[0]}")
+    _settle_overtaken(conn)
     record_status_changes(conn)
     if failed:
         raise ChangeProcessingError("; ".join(failed))
