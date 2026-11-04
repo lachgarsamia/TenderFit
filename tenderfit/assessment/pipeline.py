@@ -300,7 +300,7 @@ def _model_decision(conn: psycopg.Connection, version_id: int, req: dict, facts:
             return Decision(UNKNOWN, f"model unavailable ({e}); not guessed", "guard", retrieval=retrieval,
                             citations=[(req["passage_id"], req["quote"])], escalate=escalate + ["model error"])
         raw, cost, tokens = res.data, res.usage.cost_usd, res.usage.input_tokens + res.usage.output_tokens
-        log_call(conn, "verdict", VERDICT_VERSION, res.usage, {"version_id": version_id, "requirement_id": req["id"]})
+        log_call(conn, "verdict", VERDICT_VERSION, res.usage, {"version_id": version_id, "requirement_id": req["id"], "profile_id": profile_id})
         conn.execute("INSERT INTO verdict_cache (key, result) VALUES (%s, %s) ON CONFLICT DO NOTHING", (key, Jsonb(raw)))
     d = guard(raw, rel, ctx, req, passages) if config.guard else unguarded(raw, rel, passages)
     d.cost, d.tokens, d.retrieval = cost, tokens, retrieval

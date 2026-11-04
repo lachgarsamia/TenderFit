@@ -2,16 +2,17 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from tenderfit.api.deps import current_profile, current_user
 from tenderfit.config import settings
 from tenderfit.db import connect
 from tenderfit.documents.service import inventory
 from tenderfit.rules import aggregate as agg
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(current_user)])
 
 REGIONS = {"north east": "UKC", "north west": "UKD", "yorkshire": "UKE", "humber": "UKE", "east midlands": "UKF",
            "west midlands": "UKG", "east of england": "UKH", "london": "UKI", "south east": "UKJ", "south west": "UKK",
@@ -73,22 +74,21 @@ def _profile(conn, profile_id: int) -> dict:
 
 
 class SearchIn(BaseModel):
-    q: str = ""
-    profile_id: int
+    q: str = Field(default="", max_length=500)
     cpv: list[str] | None = None
     regions: list[str] | None = None
     min_days: int = 0
-    limit: int = 30
+    limit: int = Field(default=30, ge=1, le=200)
 
 
 @router.post("/search")
-def search(body: SearchIn):
+def search(body: SearchIn, profile_id: int = Depends(current_profile)):
     from tenderfit.api.main import effective_status
 
     parsed = parse_request(body.q)
     now = datetime.now(timezone.utc)
     with connect() as conn:
-        profile = _profile(conn, body.profile_id)
+        profile = _profile(conn, profile_id)
         # With nothing typed, the supplier's own products and regions are the search; no sector is assumed.
         from_profile = not body.q.strip()
         cpv = body.cpv if body.cpv is not None else (sorted({c[:3] for c in profile["cpv"]}) if from_profile else parsed["cpv"])
@@ -120,9 +120,9 @@ def search(body: SearchIn):
             f"""{select} AND (o.status IN ('cancelled', 'awarded') OR o.deadline <= now())
                 AND EXISTS (SELECT 1 FROM assessment a JOIN lot l ON l.id = a.lot_id WHERE l.opportunity_id = o.id
                             AND a.profile_id = %s AND a.status = 'done')
-                ORDER BY o.deadline DESC NULLS LAST, o.id LIMIT %s""", (*args, body.profile_id, body.limit)).fetchall()
+                ORDER BY o.deadline DESC NULLS LAST, o.id LIMIT %s""", (*args, profile_id, body.limit)).fetchall()
         lot_ids = [l["id"] for r in rows for l in (r["lots"] or [])]
-        fits = _fit(conn, lot_ids, body.profile_id, profile) if lot_ids else {}
+        fits = _fit(conn, lot_ids, profile_id, profile) if lot_ids else {}
         wm = conn.execute("SELECT watermark FROM import_state").fetchone()
 
     def item(r, s):
@@ -145,7 +145,7 @@ def search(body: SearchIn):
 
 
 @router.get("/tenders/{opportunity_id}")
-def tender(opportunity_id: int, profile_id: int):
+def tender(opportunity_id: int, profile_id: int = Depends(current_profile)):
     from tenderfit.api.main import effective_status
 
     with connect() as conn:
@@ -185,7 +185,7 @@ def lot_summary(lot_id: int):
     return {**lot, "lots": siblings}
 
 
-def _readable_document(conn, document_id: int, profile_id: int | None) -> dict:
+def _readable_document(conn, document_id: int, profile_id: int) -> dict:
     d = conn.execute("""SELECT * FROM document WHERE id = %s AND (owner_profile_id IS NULL OR owner_profile_id = %s)""",
                      (document_id, profile_id)).fetchone()
     if not d:
@@ -194,7 +194,7 @@ def _readable_document(conn, document_id: int, profile_id: int | None) -> dict:
 
 
 @router.get("/passages/{passage_id}")
-def passage(passage_id: int, profile_id: int | None = None):
+def passage(passage_id: int, profile_id: int = Depends(current_profile)):
     """A cited passage with its neighbours, so a quote can be read in context in any format, including DOCX and notice fields."""
     with connect() as conn:
         p = conn.execute("SELECT id, document_id, ordinal FROM passage WHERE id = %s", (passage_id,)).fetchone()
@@ -209,7 +209,7 @@ def passage(passage_id: int, profile_id: int | None = None):
 
 
 @router.get("/documents/{document_id}/file")
-def document_file(document_id: int, profile_id: int | None = None):
+def document_file(document_id: int, profile_id: int = Depends(current_profile)):
     with connect() as conn:
         d = _readable_document(conn, document_id, profile_id)
     path = Path(d["storage_path"] or "")
@@ -222,7 +222,7 @@ def document_file(document_id: int, profile_id: int | None = None):
 
 
 @router.get("/lots/{lot_id}/preparation")
-def preparation(lot_id: int, profile_id: int):
+def preparation(lot_id: int, profile_id: int = Depends(current_profile)):
     from tenderfit.api.assessments import get_assessment
 
     a = get_assessment(lot_id, profile_id)
@@ -269,8 +269,8 @@ def preparation(lot_id: int, profile_id: int):
             "note": "TenderFit will not price, commit or submit for you; you submit on the buyer's portal."}
 
 
-@router.get("/profiles/{profile_id}/evidence-impact")
-def evidence_impact(profile_id: int):
+@router.get("/profile/evidence-impact")
+def evidence_impact(profile_id: int = Depends(current_profile)):
     with connect() as conn:
         rows = conn.execute(
             """SELECT f.id, f.label, f.evidence_status, f.needs_update_reason,
@@ -286,8 +286,8 @@ def evidence_impact(profile_id: int):
     return rows
 
 
-@router.get("/profiles/{profile_id}/pursued")
-def pursued(profile_id: int):
+@router.get("/profile/pursued")
+def pursued(profile_id: int = Depends(current_profile)):
     with connect() as conn:
         return conn.execute(
             """SELECT d.lot_id, d.created_at, l.lot_no, l.title AS lot_title, o.title, o.deadline, b.name AS buyer

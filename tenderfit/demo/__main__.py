@@ -9,13 +9,16 @@ Add --fast to use a hashing embedder instead of downloading the real embedding a
 import argparse
 import hashlib
 import json
+import os
 import re
 from datetime import date, timedelta
 
 import httpx
 
 from tenderfit.assessment.pipeline import assess_lot
+from tenderfit.auth import create_user, grant
 from tenderfit.changes.apply import AMENDMENT_LOCK, ChangeProcessingError, _process_pending, shadow_full
+from tenderfit.config import settings
 from tenderfit.db import connect, migrate
 from tenderfit.demo import scenario
 from tenderfit.demo.llm import DemoLLM
@@ -26,6 +29,9 @@ from tenderfit.profile import service as ps
 
 AMENDMENT = "090002-2026"
 SUPPLIERS = ("Brightwell Furniture (fictional)", "Oakline Seating (fictional)")
+# Known, public passwords: created only in demo mode, for fictional suppliers. Set DEMO_PASSWORD to choose your own.
+DEMO_USERS = {"brightwell@demo.test": SUPPLIERS[0], "oakline@demo.test": SUPPLIERS[1]}
+DEMO_PASSWORD = "fictional-demo-only"
 
 
 class HashEmbedder:
@@ -110,8 +116,12 @@ def seed_suppliers(conn, today: date) -> dict[str, int]:
     add_supported(conn, oak, "insurance", "Public liability policy", {"type": "public_liability", "amount_gbp": 5_000_000}, "Insurance schedule (fictional)",
                   ["Insured: Oakline Seating Ltd.", "Cover: Public liability, limit of indemnity GBP 5,000,000.", f"Period of insurance: to {(today + timedelta(days=300)).isoformat()}."],
                   "Cover: Public liability, limit of indemnity GBP 5,000,000.", valid_until=today + timedelta(days=300))
+    ids = {SUPPLIERS[0]: bright, SUPPLIERS[1]: oak}
+    password = os.environ.get("DEMO_PASSWORD", DEMO_PASSWORD)
+    for email, name in DEMO_USERS.items():
+        grant(conn, create_user(conn, email, password), ids[name])
     conn.commit()
-    return {SUPPLIERS[0]: bright, SUPPLIERS[1]: oak}
+    return ids
 
 
 def _models(a) -> dict:
@@ -119,6 +129,8 @@ def _models(a) -> dict:
 
 
 def load(conn, a) -> None:
+    if not settings.demo_scripted_llm:
+        raise SystemExit("refusing: this creates accounts with a published password. Set DEMO_SCRIPTED_LLM=true, on a database used only for the demo.")
     today = date.today()
     if conn.execute("SELECT 1 FROM opportunity WHERE ocid = %s", (scenario.OCID,)).fetchone():
         print("already loaded; use reset first")
@@ -136,7 +148,7 @@ def load(conn, a) -> None:
     assess_lot(conn, lots["1"], bright, llm, http=portal(), agent=False, **_models(a))
     assess_lot(conn, lots["2"], bright, llm, http=portal(), agent=False, **_models(a))
     assess_lot(conn, lots["2"], oak, llm, http=portal(), agent=False, **_models(a))
-    print(f"loaded (fictional): lots {lots}, suppliers {ids}")
+    print(f"loaded (fictional): lots {lots}, suppliers {ids}; sign in as {', '.join(DEMO_USERS)} (see docs/DEMO.md)")
 
 
 def amend(conn, a) -> None:

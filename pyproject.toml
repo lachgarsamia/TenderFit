@@ -16,6 +16,7 @@ dependencies = [
     "anthropic>=1.0",
     "sentence-transformers>=3.0",
     "pgvector>=0.3",
+    "argon2-cffi>=23.1",
 ]
 
 [project.optional-dependencies]

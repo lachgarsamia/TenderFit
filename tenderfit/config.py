@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     retrieval_min_score: float | None = None  # no default: a threshold must come from an evaluation on real data
     corrective_max_attempts: int = 1
     max_upload_bytes: int = 25 * 1024 * 1024
+    registration_enabled: bool = False  # open sign-up; off unless an operator turns it on
+    session_hours: int = 12
+    session_cookie_secure: bool = True  # set false only for plain http on your own machine
+    login_max_failures: int = 10
+    login_lockout_minutes: int = 15
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 

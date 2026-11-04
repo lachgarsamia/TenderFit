@@ -21,12 +21,16 @@ class ConfirmationError(ValueError):
     pass
 
 
+class ConfirmationNotFound(ConfirmationError):
+    """Unknown, or another supplier's: the caller is not told which."""
+
+
 def _verdict(conn: psycopg.Connection, verdict_id: int) -> dict:
     v = conn.execute(
         """SELECT v.*, a.lot_id, a.profile_id FROM verdict v JOIN assessment a ON a.id = v.assessment_id WHERE v.id = %s""",
         (verdict_id,)).fetchone()
     if not v:
-        raise ConfirmationError("verdict not found")
+        raise ConfirmationNotFound("not found")
     return v
 
 
@@ -38,7 +42,7 @@ def confirm(conn: psycopg.Connection, point: str, user: str, target_id: int, dec
     payload = payload or {}
     reassess: list[tuple[int, int]] = []
     if point in ("G2", "G3", "G5", "G6") and profile_id and _verdict(conn, target_id)["profile_id"] != profile_id:
-        raise ConfirmationError("this verdict belongs to another profile")
+        raise ConfirmationNotFound("not found")
 
     if point == "G1":
         if not profile_id:
@@ -72,7 +76,7 @@ def confirm(conn: psycopg.Connection, point: str, user: str, target_id: int, dec
         if not fact:
             raise ConfirmationError("fact not found")
         if profile_id and fact["profile_id"] != profile_id:
-            raise ConfirmationError("this fact belongs to another profile")
+            raise ConfirmationNotFound("not found")
         valid_until = changes.get("valid_until", fact["valid_until"])
         if valid_until and valid_until < date.today():
             raise ConfirmationError(f"this expired on {valid_until.isoformat()}; add the renewed document or a new expiry date")
@@ -104,7 +108,7 @@ def confirm(conn: psycopg.Connection, point: str, user: str, target_id: int, dec
             raise ConfirmationError("document not found")
         if profile_id:  # this supplier's own view; other suppliers can still upload the document
             if ref["owner_profile_id"] not in (None, profile_id):
-                raise ConfirmationError("document not found")
+                raise ConfirmationNotFound("not found")
             conn.execute(
                 """INSERT INTO document_ref_state (ref_id, profile_id, status, note, decided_by) VALUES (%s, %s, 'confirmed_none', %s, %s)
                    ON CONFLICT (ref_id, profile_id) DO UPDATE SET status = 'confirmed_none', document_id = NULL, note = EXCLUDED.note,

@@ -185,7 +185,7 @@ def extract_version(conn: psycopg.Connection, version_id: int, llm: LLM, force: 
             raise
         stats["calls"] += 1
         stats["cost_usd"] += res.usage.cost_usd
-        log_call(conn, "extract", EXTRACT_VERSION, res.usage, {"version_id": version_id, "passages": [p["id"] for p in batch]})
+        log_call(conn, "extract", EXTRACT_VERSION, res.usage, {"version_id": version_id, "passages": [p["id"] for p in batch], "profile_id": profile_id})
         items = res.data.get("requirements") if isinstance(res.data, dict) else None
         if not isinstance(items, list):
             _reject(conn, version_id, {}, "response", "model response had no requirement list")

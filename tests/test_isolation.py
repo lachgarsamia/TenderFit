@@ -1,20 +1,21 @@
-"""Profile A can never influence profile B: not through answers, uploads, confirmations, caches or reassessment plans."""
+"""Supplier A can never reach or influence supplier B, directly or through an id nested in another request."""
 import io
 import socket
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
 
-from tenderfit.api.main import app
 from tenderfit.assessment.pipeline import assess_lot
+from tenderfit.changes.apply import apply_profile_change, process_pending
 from tenderfit.changes.impact import load_deps
 from tenderfit.config import settings
 from tenderfit.documents import fetch as fetching
 from tenderfit.documents import service
 from tenderfit.ingest.importer import run_import
-from tenderfit.profile.seed import seed
+from tenderfit.jobs import queue
+from tenderfit.profile.seed import evidence_pdf, seed
 from tests import northfield
+from tests.conftest import as_supplier
 from tests.fakes import ScriptedLLM
 from tests.test_importer import NOW, T0, T1, fake
 from tests.test_pipeline import TODAY, portal, verdicts
@@ -41,19 +42,20 @@ def verdict_of(db, aid, statement):
                          WHERE v.assessment_id = %s AND r.statement LIKE %s""", (aid, statement + "%")).fetchone()
 
 
+def fact_of(db, profile, attribute="insurance"):
+    return db.execute("SELECT id FROM profile_fact WHERE profile_id = %s AND attribute = %s LIMIT 1", (profile, attribute)).fetchone()["id"]
+
+
 def test_a_suppliers_answer_never_reaches_another_suppliers_prompt(world):
     db, a, b, lot, vid, llm = world
+    service.attach_upload(db, vid, "ITT.docx", northfield.itt_docx(), "operator")
     aid = assess_lot(db, lot, a, llm, **KW)
     v = verdict_of(db, aid, "Share of recycled")
-    if v is None:
-        service.attach_upload(db, vid, "ITT.docx", northfield.itt_docx(), "operator")
-        aid = assess_lot(db, lot, a, llm, **KW)
-        v = verdict_of(db, aid, "Share of recycled")
     q = db.execute("SELECT id FROM question WHERE verdict_id = %s", (v["id"],)).fetchone()
     secret = "SECRET-MARGIN-ANSWER-OF-SUPPLIER-A"
-    with TestClient(app) as c:
-        assert c.post(f"/questions/{q['id']}/answer", json={"answer": secret, "profile_id": b}).status_code == 404, "B cannot answer for A"
-        assert c.post(f"/questions/{q['id']}/answer", json={"answer": secret, "profile_id": a}).status_code == 200
+    with as_supplier(db, a) as ca, as_supplier(db, b) as cb:
+        assert cb.post(f"/questions/{q['id']}/answer", json={"answer": secret}).status_code == 404, "B cannot answer for A"
+        assert ca.post(f"/questions/{q['id']}/answer", json={"answer": secret}).status_code == 200
     before = len(llm.users)
     assess_lot(db, lot, b, llm, **KW)
     assert all(secret not in u for u in llm.users[before:]), "B's prompts never contain A's answer"
@@ -66,21 +68,16 @@ def test_a_private_upload_changes_nothing_for_another_supplier(world):
     assess_lot(db, lot, b, llm, **KW)
     b_before = service.inventory(db, vid, b)
     itt = next(d for d in service.inventory(db, vid, a)["documents"] if d["label"] == "Instructions to Tenderers")
-    with TestClient(app) as c:
-        r = c.post(f"/lots/{lot}/documents", data={"profile_id": a, "ref_id": itt["id"], "user": "a"},
-                   files={"file": ("ITT.docx", io.BytesIO(northfield.itt_docx()))})
+    with as_supplier(db, a) as ca, as_supplier(db, b) as cb:
+        r = ca.post(f"/lots/{lot}/documents", data={"ref_id": itt["id"]}, files={"file": ("ITT.docx", io.BytesIO(northfield.itt_docx()))})
         assert r.status_code == 200, r.text
         assert r.json()["jobs"] == [], "A has no assessment yet, and B's is not touched"
-        shown_b = c.get(f"/lots/{lot}/documents", params={"profile_id": b}).json()
-        shown_a = c.get(f"/lots/{lot}/documents", params={"profile_id": a}).json()
-        public = c.get(f"/lots/{lot}/documents").json()
+        shown_a, shown_b = ca.get(f"/lots/{lot}/documents").json(), cb.get(f"/lots/{lot}/documents").json()
     label = "Instructions to Tenderers"
     assert next(d for d in shown_a["documents"] if d["label"] == label)["status"] == "read"
     assert next(d for d in shown_b["documents"] if d["label"] == label)["status"] == "not_retrieved"
-    assert next(d for d in public["documents"] if d["label"] == label)["status"] == "not_retrieved"
     assert service.inventory(db, vid, b)["coverage"] == b_before["coverage"]
     assert all(d["label"] != "Appendix C" for d in shown_b["documents"]), "references found in A's file are A's"
-
     aid = assess_lot(db, lot, a, llm, **KW)
     assert verdict_of(db, aid, "Comparable contract"), "A's private document yields requirements for A"
     bid = assess_lot(db, lot, b, llm, **KW)
@@ -89,44 +86,85 @@ def test_a_private_upload_changes_nothing_for_another_supplier(world):
     assert private["owner_profile_id"] == a
 
 
-def test_private_passages_are_not_retrievable_by_others(world):
+def test_private_text_stays_out_of_retrieval_and_prompts_for_others(world):
     from tenderfit.retrieval.search import index_version, search
     db, a, b, lot, vid, llm = world
     service.attach_upload(db, vid, "ITT.docx", northfield.itt_docx(), "a", None, a)
     index_version(db, vid, BagEmbedder())
     q = "comparable contract customer reference Appendix C"
+
     def texts(pid):
         return " ".join(h.text for h in search(db, vid, q, emb=BagEmbedder(), rr=OverlapReranker(), profile_id=pid, k=20))
     assert "comparable contract" in texts(a)
     assert "comparable contract" not in texts(b)
     assert "comparable contract" not in texts(None)
+    before = len(llm.users)
+    assess_lot(db, lot, b, llm, **KW)
+    assert all("comparable contract" not in u for u in llm.users[before:]), "no prompt built for B contains A's document"
 
 
-def test_a_confirmation_only_applies_to_the_supplier_who_made_it(world):
+def test_confirmations_are_scoped_and_other_suppliers_targets_look_missing(world):
     db, a, b, lot, vid, llm = world
     itt = next(d for d in service.inventory(db, vid)["documents"] if d["label"] == "Instructions to Tenderers")
     aid = assess_lot(db, lot, a, llm, **KW)
-    with TestClient(app) as c:
-        assert c.post("/confirmations", json={"point": "G7", "target_id": itt["id"], "decision": "none_issued", "profile_id": a}).status_code == 200
-        v = verdict_of(db, aid, "Deliver all desks")
-        bad = c.post("/confirmations", json={"point": "G6", "target_id": v["id"], "decision": "override", "reason": "x", "profile_id": b})
-        assert bad.status_code == 422 and "another profile" in bad.json()["detail"]
-    status = lambda p: next(d for d in service.inventory(db, vid, p)["documents"] if d["label"] == "Instructions to Tenderers")["status"]  # noqa: E731
+    v = verdict_of(db, aid, "Deliver all desks")
+    with as_supplier(db, a) as ca, as_supplier(db, b) as cb:
+        assert ca.post("/confirmations", json={"point": "G7", "target_id": itt["id"], "decision": "none_issued"}).status_code == 200
+        for point, decision, target in (("G6", "override", v["id"]), ("G2", "confirm_declaration", v["id"]), ("G3", "confirm_for_lot", v["id"]),
+                                        ("G5", "clarification_reviewed", v["id"]), ("G4", "reconfirmed", fact_of(db, a))):
+            r = cb.post("/confirmations", json={"point": point, "target_id": target, "decision": decision, "reason": "x"})
+            assert r.status_code == 404, (point, r.text)
+    status = lambda p: next(d for d in service.inventory(db, vid, p)["documents"] if d["label"] == "Instructions to Tenderers")["status"]
     assert status(a) == "confirmed_none" and status(b) == "not_retrieved" and status(None) == "not_retrieved"
+    assert db.execute("SELECT override_status FROM verdict WHERE id = %s", (v["id"],)).fetchone()["override_status"] is None
+    assert db.execute("SELECT count(*) n FROM lot_fact_confirmation").fetchone()["n"] == 0
 
 
-def test_changes_are_scoped_and_other_suppliers_events_do_not_appear(world):
+def test_another_suppliers_private_document_reference_looks_missing(world):
     db, a, b, lot, vid, llm = world
-    from tenderfit.changes.apply import process_pending
+    ref = service.attach_upload(db, vid, "private.docx", northfield.itt_docx(), "a", None, a)["ref_id"]
+    with as_supplier(db, b) as cb:
+        assert cb.post("/confirmations", json={"point": "G7", "target_id": ref, "decision": "none_issued"}).status_code == 404
+        up = cb.post(f"/lots/{lot}/documents", data={"ref_id": ref}, files={"file": ("x.docx", io.BytesIO(northfield.itt_docx()))})
+        assert up.status_code == 404
+
+
+def test_amendment_events_and_retries_are_scoped(world):
+    db, a, b, lot, vid, llm = world
     assess_lot(db, lot, a, llm, **KW)
     r = northfield.release(rid="029400-2026", tag="tenderUpdate", date="2026-10-12T18:00:00Z", deadline="2099-12-31T12:00:00Z",
                            spec_url="https://portal.test/Spec_Desks_v2.pdf")
     run_import(db, fake([r]), T0, T1, now=NOW)
     process_pending(db, llm, http=portal(northfield.pdf(northfield.SPEC_V2)), **KW)
-    with TestClient(app) as c:
-        assert len(c.get("/changes", params={"profile_id": a}).json()) == 1
-        assert c.get("/changes", params={"profile_id": b}).json() == []
-        assert c.get("/changes", params={"profile_id": 999999}).status_code == 404
+    ev = db.execute("SELECT id FROM change_event WHERE kind = 'version'").fetchone()
+    db.execute("UPDATE change_event SET status = 'failed' WHERE id = %s", (ev["id"],))
+    db.commit()
+    with as_supplier(db, a) as ca, as_supplier(db, b) as cb:
+        assert len(ca.get("/changes").json()) == 1
+        assert cb.get("/changes").json() == []
+        assert cb.post(f"/changes/{ev['id']}/retry").status_code == 404
+        assert ca.post(f"/changes/{ev['id']}/retry").status_code == 200
+
+
+def test_cross_profile_amendment_processing_keeps_each_suppliers_decisions(world):
+    db, a, b, lot, vid, llm = world
+    assess_lot(db, lot, a, llm, **KW)
+    assess_lot(db, lot, b, llm, **KW)
+    r = northfield.release(rid="029400-2026", tag="tenderUpdate", date="2026-10-12T18:00:00Z", deadline="2099-12-31T12:00:00Z",
+                           spec_url="https://portal.test/Spec_Desks_v2.pdf")
+    run_import(db, fake([r]), T0, T1, now=NOW)
+    process_pending(db, llm, http=portal(northfield.pdf(northfield.SPEC_V2)), **KW)
+    facts = {p: {x["id"] for x in db.execute("SELECT id FROM profile_fact WHERE profile_id = %s", (p,))} for p in (a, b)}
+    rows = db.execute("""SELECT a.profile_id, vf.fact_id FROM verdict_fact vf JOIN verdict v ON v.id = vf.verdict_id
+                         JOIN assessment a ON a.id = v.assessment_id""").fetchall()
+    assert rows and all(x["fact_id"] in facts[x["profile_id"]] for x in rows), "a verdict only ever cites its own supplier's facts"
+
+
+def test_a_job_can_only_touch_the_facts_of_the_supplier_it_names(world):
+    db, a, b, lot, vid, llm = world
+    assess_lot(db, lot, a, llm, **KW)
+    aid2 = apply_profile_change(db, lot, a, [fact_of(db, b)], llm, "forged job payload", **KW)
+    assert all(v["carried_over"] for v in db.execute("SELECT carried_over FROM verdict WHERE assessment_id = %s", (aid2,)))
 
 
 def test_a_reassessment_plan_uses_only_that_suppliers_dependencies(world):
@@ -148,25 +186,63 @@ def test_the_verdict_cache_is_per_supplier(world):
     assert len(llm.users) > n, "B's model verdicts are B's own, not A's cached ones"
 
 
-def test_identifiers_are_validated_and_facts_are_owned(world):
+def test_every_fact_and_evidence_route_refuses_another_supplier(world):
     db, a, b, lot, vid, llm = world
-    fact = db.execute("SELECT id FROM profile_fact WHERE profile_id = %s LIMIT 1", (a,)).fetchone()["id"]
-    with TestClient(app) as c:
-        assert c.post(f"/lots/{lot}/assess", json={"profile_id": 999999}).status_code == 404
-        assert c.get(f"/lots/{lot}/assessment", params={"profile_id": 999999}).status_code == 404
-        assert c.get("/profile/facts", params={"profile_id": 999999}).status_code == 404
-        assert c.put(f"/profile/facts/{fact}", params={"profile_id": b}, json={"label": "hijacked"}).status_code == 404
-        assert c.post(f"/profile/facts/{fact}/verify", json={"profile_id": b}).status_code == 404
-        assert c.post("/profile/evidence", data={"profile_id": b, "kind": "x", "fact_id": fact, "quote": "x" * 20},
+    fact = fact_of(db, a)
+    with as_supplier(db, b) as c:
+        assert c.put(f"/profile/facts/{fact}", json={"label": "hijacked"}).status_code == 404
+        assert c.post(f"/profile/facts/{fact}/verify").status_code == 404
+        assert c.post("/profile/evidence", data={"kind": "x", "fact_id": fact, "quote": "x" * 20},
                       files={"file": ("a.txt", io.BytesIO(b"hello"))}).status_code == 404
-        assert c.put(f"/profile/facts/{fact}", params={"profile_id": a}, json={"evidence_status": "document_on_file"}).status_code == 422, \
-            "document status can only come from a checked document"
+        assert c.post(f"/profile/facts/{fact}/renew", data={"quote": "x" * 20, "expires_on": "2099-01-01"},
+                      files={"file": ("a.txt", io.BytesIO(b"hello"))}).status_code == 404
+        listed = {f["id"] for f in c.get("/profile/facts").json()}
+    assert fact not in listed
+    assert db.execute("SELECT label FROM profile_fact WHERE id = %s", (fact,)).fetchone()["label"] != "hijacked"
+
+
+def test_a_file_of_one_supplier_cannot_prove_anothers_fact(world):
+    from tenderfit.profile import service as ps
+    db, a, b, lot, vid, llm = world
+    eid = ps.add_evidence(db, b, "insurance", "b.pdf", evidence_pdf("B", ["Cover: Public liability, limit of indemnity GBP 5,000,000."]))
+    with pytest.raises(ps.ProfileError, match="different suppliers"):
+        ps.link_support(db, fact_of(db, a), eid, 1, "Cover: Public liability, limit of indemnity GBP 5,000,000.")
+
+
+def test_assessment_history_jobs_and_trace_are_scoped(world):
+    db, a, b, lot, vid, llm = world
+    aid = assess_lot(db, lot, a, llm, **KW)
+    with as_supplier(db, a) as ca, as_supplier(db, b) as cb:
+        jid = ca.post(f"/lots/{lot}/assess").json()["jobs"][0]
+        assert ca.get(f"/jobs/{jid}").status_code == 200
+        assert cb.get(f"/jobs/{jid}").status_code == 404, "another supplier's job"
+        assert ca.get(f"/assessments/{aid}/trace").status_code == 200
+        assert cb.get(f"/assessments/{aid}/trace").status_code == 404
+        assert cb.get(f"/lots/{lot}/assessment").status_code == 404, "B has no assessment; A's is not shown"
+        assert cb.get(f"/lots/{lot}/preparation").status_code == 404
+    shared = queue.enqueue(db, "import", {})
+    db.commit()
+    with as_supplier(db, a) as ca:
+        assert ca.get(f"/jobs/{shared}").status_code == 404, "shared jobs are not exposed"
+
+
+def test_a_client_supplied_profile_id_is_ignored(world):
+    """The old API took profile_id from the client. Sending it now changes nothing."""
+    db, a, b, lot, vid, llm = world
+    assess_lot(db, lot, a, llm, **KW)
+    with as_supplier(db, b) as cb:
+        assert cb.get(f"/lots/{lot}/assessment", params={"profile_id": a}).status_code == 404
+        facts = cb.get("/profile/facts", params={"profile_id": a}).json()
+        assert {f["profile_id"] for f in facts} == {b}
+        assert cb.post(f"/lots/{lot}/assess", json={"profile_id": a}).status_code == 200
+    job = db.execute("SELECT payload FROM job WHERE kind = 'assess' ORDER BY id DESC LIMIT 1").fetchone()
+    assert job["payload"]["profile_id"] == b, "the job runs for the signed-in supplier"
 
 
 def test_upload_limits(world, monkeypatch):
     db, a, b, lot, vid, llm = world
-    with TestClient(app) as c:
-        post = lambda name, body: c.post(f"/lots/{lot}/documents", data={"profile_id": a}, files={"file": (name, io.BytesIO(body))})  # noqa: E731
+    with as_supplier(db, a) as c:
+        post = lambda name, body: c.post(f"/lots/{lot}/documents", files={"file": (name, io.BytesIO(body))})
         assert post("x.exe", b"MZ").status_code == 415
         assert post("fake.pdf", b"not a pdf at all").status_code == 415
         assert post("fake.docx", b"not a zip").status_code == 415
@@ -201,10 +277,9 @@ def test_public_addresses_pass_and_redirects_are_checked_at_each_hop(monkeypatch
 
 def test_redirect_loops_stop():
     n = []
+
     def handler(request):
         n.append(1)
         return httpx.Response(302, headers={"location": "https://portal.test/again"})
     out = fetching.fetch("https://portal.test/a", httpx.Client(transport=httpx.MockTransport(handler)))
     assert out.outcome == "error" and "too many" in out.note and len(n) == fetching.MAX_REDIRECTS + 1
-
-

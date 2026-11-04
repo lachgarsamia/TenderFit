@@ -5,6 +5,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from tenderfit.config import settings
+from tenderfit.db import Conn
 from tenderfit.ingest import status as st
 from tenderfit.ingest.client import FtsClient
 from tenderfit.ingest.normalise import Linked, Version, content_hash, finite, normalise, parse_ts
@@ -165,12 +166,44 @@ def incremental(conn: psycopg.Connection, client: FtsClient, now: datetime | Non
     return run_import(conn, client, since, now, now=now)
 
 
-def replay(conn: psycopg.Connection, now: datetime | None = None) -> dict:
+class ReplayRefused(Exception):
+    """A destructive replay was asked for without its safeguards being met. Nothing was changed."""
+
+
+def replay(conn: Conn, now: datetime | None = None) -> dict:
+    """Re-apply every stored raw release. Non-destructive: rows are only added or refreshed, and nothing is deleted.
+
+    Assessments, requirements, documents and supplier decisions are untouched. To rebuild from nothing and compare,
+    scripts/replay_check.py does it in a separate temporary database."""
+    applied = 0
     with conn.transaction():
-        conn.execute("TRUNCATE lot, linked_notice, notice_version, opportunity, buyer RESTART IDENTITY CASCADE")
-        applied = 0
         for r in conn.execute("SELECT id, payload, fetched_at FROM raw_release ORDER BY release_date, id").fetchall():
             applied += apply_release(conn, r["id"], json.loads(r["payload"]), r["fetched_at"]) is not None
         refresh_statuses(conn, now or datetime.now(timezone.utc))
     conn.commit()
     return {"applied": applied}
+
+
+# Tables a destructive rebuild empties, directly or through CASCADE. Shown to the operator before anything happens.
+DESTROYED_BY_REBUILD = ("opportunity", "notice_version", "lot", "linked_notice", "buyer", "document", "document_ref", "document_ref_state",
+                        "passage", "passage_edge", "requirement", "requirement_condition", "requirement_rejection", "dependency", "assessment", "verdict",
+                        "verdict_citation", "verdict_fact", "verdict_condition", "question", "agent_step", "change_event", "change_impact",
+                        "version_preparation", "lot_decision", "lot_fact_confirmation")
+
+
+def rebuild_scope(conn: Conn) -> dict[str, int]:
+    """How many rows a destructive rebuild would delete, per table."""
+    return {t: conn.execute(f"SELECT count(*) AS n FROM {t}").fetchone()["n"] for t in DESTROYED_BY_REBUILD}  # type: ignore[index]
+
+
+def destructive_rebuild(conn: Conn, confirm_database: str | None, now: datetime | None = None) -> dict:
+    """Delete all derived data, including every assessment and supplier decision, and rebuild from raw releases.
+
+    Not an ordinary replay. The caller must pass the exact name of the connected database as confirmation."""
+    row = conn.execute("SELECT current_database() AS name").fetchone()
+    name = row["name"] if row else ""
+    if confirm_database != name:
+        raise ReplayRefused(f"refusing: this deletes data; confirm by passing the database name ({name!r})")
+    with conn.transaction():
+        conn.execute("TRUNCATE lot, linked_notice, notice_version, opportunity, buyer RESTART IDENTITY CASCADE")
+    return replay(conn, now)

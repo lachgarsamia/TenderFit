@@ -47,6 +47,8 @@ def test_upgrade_repairs_what_a_failed_run_left_behind(_test_db):
         assert rows[1]["recommendation"] == "good", "the last good result is current again"
         assert "interrupted" in rows[2]["error"]
         assert c.execute("SELECT status FROM change_event").fetchone()["status"] == "applied", "earlier events were final"
+        assert c.execute("SELECT name FROM business_profile").fetchone()["name"] == "p", "supplier data is preserved"
+        assert c.execute("SELECT count(*) n FROM profile_member").fetchone()["n"] == 0, "nobody gains access to an existing supplier by upgrading"
 
 
 def test_worker_schedules_unfinished_amendments_without_an_import(db, monkeypatch):

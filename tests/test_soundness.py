@@ -3,9 +3,7 @@ import io
 from datetime import date
 
 import pytest
-from fastapi.testclient import TestClient
 
-from tenderfit.api.main import app
 from tenderfit.assessment.confirm import ConfirmationError, confirm
 from tenderfit.assessment.pipeline import assess_lot
 from tenderfit.changes.apply import apply_profile_change, process_pending
@@ -18,6 +16,7 @@ from tenderfit.profile import service as profiles
 from tenderfit.profile.seed import evidence_pdf, seed
 from tenderfit.profile.verify import parse_expiry, verify_fact_evidence
 from tests import northfield
+from tests.conftest import as_supplier
 from tests.fakes import ScriptedLLM, passage_id
 from tests.test_extraction import req
 from tests.test_importer import NOW, T0, T1, fake
@@ -328,9 +327,9 @@ def test_expired_fact_can_be_renewed_and_triggers_reassessment(world):
     db.commit()
     new_policy = evidence_pdf("Insurance schedule (fictional)", ["Insured: Atlas Furniture Ltd.", "Cover: Public liability, limit of indemnity GBP 5,000,000.",
                                                                 "Period of insurance: 1 December 2029 to 30 November 2030."])
-    with TestClient(app) as c:
+    with as_supplier(db, atlas) as c:
         r = c.post(f"/profile/facts/{ins['id']}/renew",
-                   data={"profile_id": atlas, "quote": "Cover: Public liability, limit of indemnity GBP 5,000,000.", "page": 1, "expires_on": "2030-11-30"},
+                   data={"quote": "Cover: Public liability, limit of indemnity GBP 5,000,000.", "page": 1, "expires_on": "2030-11-30"},
                    files={"file": ("renewal.pdf", io.BytesIO(new_policy))})
         assert r.status_code == 200 and r.json()["verified"], r.text
     f = fact_row(db, atlas, "insurance")
@@ -388,10 +387,10 @@ def test_human_verification_is_separate_and_explicit(world):
     db, atlas, lot, llm, aid = world
     ins = fact_row(db, atlas, "insurance")
     assert all(s["human_verified_by"] is None for s in db.execute("SELECT human_verified_by FROM fact_support WHERE fact_id = %s", (ins["id"],)))
-    with TestClient(app) as c:
-        assert c.post(f"/profile/facts/{ins['id']}/verify", json={"profile_id": atlas, "user": "sam"}).status_code == 200
-        facts = {f["id"]: f for f in c.get("/profile/facts", params={"profile_id": atlas}).json()}
-    assert facts[ins["id"]]["supports"][0]["human_verified_by"] == "sam"
+    with as_supplier(db, atlas) as c:
+        assert c.post(f"/profile/facts/{ins['id']}/verify", json={}).status_code == 200
+        facts = {f["id"]: f for f in c.get("/profile/facts").json()}
+    assert facts[ins["id"]]["supports"][0]["human_verified_by"] == "user%d@test.example" % atlas
     assert facts[ins["id"]]["verification"]["level"] in ("supports", "current")
 
 

@@ -1,17 +1,18 @@
 from datetime import date, datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from pydantic import BaseModel, Field
 
-from tenderfit.assessment.confirm import ConfirmationError, confirm
+from tenderfit.api.deps import Identity, current_profile, current_user
+from tenderfit.assessment.confirm import ConfirmationError, ConfirmationNotFound, confirm
 from tenderfit.config import settings
 from tenderfit.db import connect
 from tenderfit.documents import service as docs
 from tenderfit.jobs import queue
 from tenderfit.profile import service as profiles
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(current_user)])
 
 
 def enqueue_assess(conn, pairs: list[tuple[int, int]], reason: str) -> list[int]:
@@ -37,11 +38,6 @@ def _lot(conn, lot_id: int) -> dict:
     if not lot:
         raise HTTPException(404, "lot not found")
     return lot
-
-
-def _require_profile(conn, profile_id: int) -> None:
-    if not conn.execute("SELECT 1 FROM business_profile WHERE id = %s", (profile_id,)).fetchone():
-        raise HTTPException(404, "profile not found")
 
 
 def _read_upload(file: UploadFile, allowed: tuple[str, ...]) -> bytes:
@@ -92,19 +88,17 @@ def _processing_state(conn, lot_id: int, profile_id: int, current_id: int | None
     return processing, last_failure
 
 
-@router.get("/profiles")
-def list_profiles():
-    with connect() as conn:
-        return conn.execute("SELECT id, name, regions, description, is_fictional FROM business_profile ORDER BY id").fetchall()
-
-
 @router.get("/lots/{lot_id}/assessment")
-def get_assessment(lot_id: int, profile_id: int):
+def read_assessment(lot_id: int, profile_id: int = Depends(current_profile)):
+    return get_assessment(lot_id, profile_id)
+
+
+def get_assessment(lot_id: int, profile_id: int) -> dict:
+    """profile_id comes from the session (see api/deps.py), never from the request."""
     from tenderfit.api.main import effective_status
 
     with connect() as conn:
         lot = _lot(conn, lot_id)
-        _require_profile(conn, profile_id)
         a = _current_assessment(conn, lot_id, profile_id)
         processing, last_failure = _processing_state(conn, lot_id, profile_id, a["id"] if a else None)
         if not a:
@@ -178,44 +172,31 @@ def get_assessment(lot_id: int, profile_id: int):
     }
 
 
-class AssessIn(BaseModel):
-    profile_id: int
-    wait: bool = False
-
-
 @router.post("/lots/{lot_id}/assess")
-def assess(lot_id: int, body: AssessIn):
+def assess(lot_id: int, profile_id: int = Depends(current_profile)):
     with connect() as conn:
         _lot(conn, lot_id)
-        _require_profile(conn, body.profile_id)
-        if body.wait:
-            from tenderfit.assessment.pipeline import assess_lot
-            from tenderfit.llm import default_llm
-            return {"assessment_id": assess_lot(conn, lot_id, body.profile_id, default_llm(), reason="requested")}
-        return {"jobs": enqueue_assess(conn, [(lot_id, body.profile_id)], "requested")}
+        return {"jobs": enqueue_assess(conn, [(lot_id, profile_id)], "requested")}
 
 
 @router.get("/lots/{lot_id}/documents")
-def lot_documents(lot_id: int, profile_id: int | None = None):
+def lot_documents(lot_id: int, profile_id: int = Depends(current_profile)):
     with connect() as conn:
         lot = _lot(conn, lot_id)
-        if profile_id is not None:
-            _require_profile(conn, profile_id)
         docs.ensure_inventory(conn, lot["current_version_id"])
         conn.commit()
         return docs.inventory(conn, lot["current_version_id"], profile_id)
 
 
 @router.post("/lots/{lot_id}/documents")
-def upload_document(lot_id: int, profile_id: int = Form(...), file: UploadFile = File(...), ref_id: int | None = Form(None),
-                    user: str = Form("user")):
+def upload_document(lot_id: int, file: UploadFile = File(...), ref_id: int | None = Form(None),
+                    profile_id: int = Depends(current_profile), me: Identity = Depends(current_user)):
     """A document a supplier uploads is private to that supplier: it changes no one else's coverage or requirements."""
     content = _read_upload(file, (".pdf", ".docx"))
     with connect() as conn:
         lot = _lot(conn, lot_id)
-        _require_profile(conn, profile_id)
         try:
-            out = docs.attach_upload(conn, lot["current_version_id"], file.filename or "upload", content, user, ref_id, profile_id)
+            out = docs.attach_upload(conn, lot["current_version_id"], file.filename or "upload", content, me.email, ref_id, profile_id)
         except ValueError as e:
             raise HTTPException(404, str(e))
         pairs = [(r["lot_id"], r["profile_id"]) for r in conn.execute(
@@ -226,104 +207,127 @@ def upload_document(lot_id: int, profile_id: int = Form(...), file: UploadFile =
 
 
 @router.get("/profile/facts")
-def get_facts(profile_id: int):
+def get_facts(profile_id: int = Depends(current_profile)):
     with connect() as conn:
-        _require_profile(conn, profile_id)
         return profiles.facts(conn, profile_id)
 
 
 def _own_fact(conn, fact_id: int, profile_id: int) -> dict:
-    fact = conn.execute("SELECT * FROM profile_fact WHERE id = %s AND profile_id = %s", (fact_id, profile_id)).fetchone()
+    fact = profiles.owned_fact(conn, fact_id, profile_id)
     if not fact:
-        raise HTTPException(404, "fact not found for this profile")
+        raise HTTPException(404, "fact not found")
     return fact
 
 
-def _lots_using(conn, verdict_ids: list[int]) -> list[tuple[int, int]]:
+def _lots_using(conn, verdict_ids: list[int], profile_id: int) -> list[tuple[int, int]]:
     return [(r["lot_id"], r["profile_id"]) for r in conn.execute(
-        "SELECT DISTINCT a.lot_id, a.profile_id FROM verdict v JOIN assessment a ON a.id = v.assessment_id WHERE v.id = ANY(%s)",
-        (verdict_ids,))]
+        """SELECT DISTINCT a.lot_id, a.profile_id FROM verdict v JOIN assessment a ON a.id = v.assessment_id
+           WHERE v.id = ANY(%s) AND a.profile_id = %s""", (verdict_ids, profile_id))]
+
+
+class FactIn(BaseModel):
+    attribute: str = Field(max_length=40)
+    label: str = Field(max_length=300)
+    value: dict = Field(default_factory=dict)
+    evidence_status: Literal["declared", "missing", "unknown"] = "declared"
+    valid_until: date | None = None
+
+
+@router.post("/profile/facts", status_code=201)
+def post_fact(body: FactIn, profile_id: int = Depends(current_profile)):
+    """A new fact can settle requirements that nothing could before, so every current assessment is re-checked."""
+    with connect() as conn:
+        try:
+            fid = profiles.add_declared_fact(conn, profile_id, body.attribute, body.label, body.value, body.evidence_status, body.valid_until)
+        except profiles.ProfileError as e:
+            raise HTTPException(422, str(e))
+        pairs = [(r["lot_id"], profile_id) for r in conn.execute(
+            """SELECT DISTINCT lot_id FROM assessment WHERE profile_id = %s AND status = 'done' AND NOT superseded AND NOT shadow""", (profile_id,))]
+        conn.commit()
+        return {"id": fid, "jobs": enqueue_assess(conn, pairs, "new fact added")}
 
 
 class FactUpdate(BaseModel):
+    label: str | None = Field(default=None, max_length=300)
     value: dict | None = None
     evidence_status: Literal["declared", "missing", "unknown"] | None = None
     valid_until: date | None = None
-    confirmed_at: date | None = None
-    confirm_by: date | None = None
-    label: str | None = None
+    clear_expiry: bool = False
 
 
 @router.put("/profile/facts/{fact_id}")
-def put_fact(fact_id: int, profile_id: int, body: FactUpdate):
+def put_fact(fact_id: int, body: FactUpdate, profile_id: int = Depends(current_profile)):
     with connect() as conn:
         _own_fact(conn, fact_id, profile_id)
-        verdict_ids = profiles.update_fact(conn, fact_id, **body.model_dump(exclude_none=True))
-        pairs = _lots_using(conn, verdict_ids)
+        try:
+            out = profiles.edit_fact(conn, fact_id, profile_id, body.label, body.value, body.evidence_status, body.valid_until, body.clear_expiry)
+        except profiles.ProfileError as e:
+            raise HTTPException(422, str(e))
+        pairs = _lots_using(conn, out["verdicts"], profile_id)
         conn.commit()
-        return {"verdicts_rechecked": verdict_ids, "jobs": enqueue_profile_change(conn, pairs, [fact_id], "profile fact changed")}
+        return {"detached_from_documents": out["detached_from_documents"], "verdicts_rechecked": out["verdicts"],
+                "jobs": enqueue_profile_change(conn, pairs, [fact_id], "profile fact changed")}
 
 
 @router.post("/profile/evidence")
-def post_evidence(profile_id: int = Form(...), kind: str = Form(...), file: UploadFile = File(...),
-                  fact_id: int | None = Form(None), page: int = Form(1), quote: str | None = Form(None),
-                  expires_on: date | None = Form(None), issuer: str | None = Form(None)):
+def post_evidence(kind: str = Form(..., max_length=40), file: UploadFile = File(...),
+                  fact_id: int | None = Form(None), page: int = Form(1, ge=1), quote: str | None = Form(None),
+                  expires_on: date | None = Form(None), issuer: str | None = Form(None), profile_id: int = Depends(current_profile)):
     content = _read_upload(file, (".pdf", ".docx", ".txt"))
     with connect() as conn:
-        _require_profile(conn, profile_id)
         if fact_id:
             _own_fact(conn, fact_id, profile_id)
-        eid = profiles.add_evidence(conn, profile_id, kind, file.filename or "evidence", content, issuer, None, expires_on)
+        try:
+            eid = profiles.add_evidence(conn, profile_id, kind, file.filename or "evidence", content, issuer, None, expires_on)
+        except profiles.ProfileError as e:
+            raise HTTPException(422, str(e))
         verified = profiles.link_support(conn, fact_id, eid, page, quote) if fact_id and quote else None
-        pairs = _lots_using(conn, profiles.verdicts_using(conn, [fact_id])) if verified else []
+        pairs = _lots_using(conn, profiles.verdicts_using(conn, [fact_id]), profile_id) if verified else []
         conn.commit()
         return {"evidence_file_id": eid, "support_verified": verified,
                 "jobs": enqueue_profile_change(conn, pairs, [fact_id], "evidence added") if pairs else []}
 
 
 @router.post("/profile/facts/{fact_id}/renew")
-def renew_fact(fact_id: int, profile_id: int = Form(...), file: UploadFile = File(...), quote: str = Form(...), page: int = Form(1),
-               expires_on: date = Form(...), issuer: str | None = Form(None)):
+def renew_fact(fact_id: int, file: UploadFile = File(...), quote: str = Form(...), page: int = Form(1, ge=1),
+               expires_on: date = Form(...), issuer: str | None = Form(None), profile_id: int = Depends(current_profile)):
     if expires_on < date.today():
         raise HTTPException(422, "the renewed document must expire in the future")
     content = _read_upload(file, (".pdf", ".docx", ".txt"))
     with connect() as conn:
         _own_fact(conn, fact_id, profile_id)
-        out = profiles.renew_evidence(conn, fact_id, file.filename or "renewal", content, page, quote, expires_on, issuer)
+        try:
+            out = profiles.renew_evidence(conn, fact_id, file.filename or "renewal", content, page, quote, expires_on, issuer)
+        except profiles.ProfileError as e:
+            raise HTTPException(422, str(e))
         checked = conn.execute("SELECT level, checks FROM fact_verification WHERE fact_id = %s ORDER BY id DESC LIMIT 1", (fact_id,)).fetchone()
         conn.commit()
-        pairs = _lots_using(conn, out["verdicts"]) if out["verified"] else []
+        pairs = _lots_using(conn, out["verdicts"], profile_id) if out["verified"] else []
         return {"verified": out["verified"], "verification": checked,
                 "jobs": enqueue_profile_change(conn, pairs, [fact_id], "evidence renewed") if pairs else []}
 
 
-class VerifyIn(BaseModel):
-    profile_id: int
-    user: str = "user"
-
-
 @router.post("/profile/facts/{fact_id}/verify")
-def verify_fact(fact_id: int, body: VerifyIn):
+def verify_fact(fact_id: int, profile_id: int = Depends(current_profile), me: Identity = Depends(current_user)):
+    """The name recorded is the signed-in person's, not something the request says."""
     with connect() as conn:
-        _own_fact(conn, fact_id, body.profile_id)
-        if not profiles.human_verify(conn, fact_id, body.user):
+        _own_fact(conn, fact_id, profile_id)
+        if not profiles.human_verify(conn, fact_id, me.email):
             raise HTTPException(409, "no checked document is linked to this fact")
-    return {"verified_by": body.user}
+    return {"verified_by": me.email}
 
 
 class AnswerIn(BaseModel):
-    answer: str
-    profile_id: int
-    user: str = "user"
+    answer: str = Field(min_length=1, max_length=4000)
 
 
 @router.post("/questions/{question_id}/answer")
-def answer(question_id: int, body: AnswerIn):
+def answer(question_id: int, body: AnswerIn, profile_id: int = Depends(current_profile), me: Identity = Depends(current_user)):
     with connect() as conn:
         q = conn.execute("""UPDATE question SET answer = %s, answered_by = %s, answered_at = now() WHERE id = %s AND profile_id = %s
-                            RETURNING verdict_id""", (body.answer, body.user, question_id, body.profile_id)).fetchone()
+                            RETURNING verdict_id""", (body.answer, me.email, question_id, profile_id)).fetchone()
         if not q:
-            raise HTTPException(404, "question not found for this profile")
+            raise HTTPException(404, "question not found")
         a = conn.execute("SELECT a.lot_id, a.profile_id FROM verdict v JOIN assessment a ON a.id = v.assessment_id "
                          "WHERE v.id = %s", (q["verdict_id"],)).fetchone()
         conn.commit()
@@ -334,22 +338,21 @@ class ConfirmIn(BaseModel):
     point: str
     target_id: int
     decision: str
-    profile_id: int
-    user: str = "user"
-    reason: str | None = None
+    reason: str | None = Field(default=None, max_length=4000)
+    payload: dict | None = None
     payload: dict | None = None
 
 
 @router.post("/confirmations")
-def post_confirmation(body: ConfirmIn):
+def post_confirmation(body: ConfirmIn, profile_id: int = Depends(current_profile), me: Identity = Depends(current_user)):
     with connect() as conn:
-        _require_profile(conn, body.profile_id)
         try:
-            out = confirm(conn, body.point, body.user, body.target_id, body.decision, body.reason, body.profile_id,
-                          body.payload)
+            out = confirm(conn, body.point, me.email, body.target_id, body.decision, body.reason, profile_id, body.payload)
+        except ConfirmationNotFound:
+            raise HTTPException(404, "not found")
         except ConfirmationError as e:
             raise HTTPException(422, str(e))
-        pairs = out.pop("reassess")
+        pairs = [p for p in out.pop("reassess") if p[1] == profile_id]
         if body.point == "G4":
             out["jobs"] = enqueue_profile_change(conn, pairs, [body.target_id], f"G4 {body.decision}")
         else:
@@ -358,7 +361,7 @@ def post_confirmation(body: ConfirmIn):
 
 
 @router.get("/assessments/{assessment_id}/trace")
-def trace(assessment_id: int, profile_id: int):
+def trace(assessment_id: int, profile_id: int = Depends(current_profile)):
     with connect() as conn:
         a = conn.execute("SELECT * FROM assessment WHERE id = %s AND profile_id = %s", (assessment_id, profile_id)).fetchone()
         if not a:
@@ -366,7 +369,8 @@ def trace(assessment_id: int, profile_id: int):
         calls = conn.execute(
             """SELECT role, model, prompt_version, input_tokens, output_tokens, cost_usd, latency_ms, stop_reason, refs, created_at
                FROM llm_call WHERE (refs->>'version_id')::bigint = %s AND created_at <= coalesce(%s, now())
-               ORDER BY id""", (a["version_id"], a["finished_at"])).fetchall()
+                 AND refs->>'profile_id' = %s::text
+               ORDER BY id""", (a["version_id"], a["finished_at"], profile_id)).fetchall()
         verdicts = conn.execute("""SELECT v.id, r.statement, v.decided_by, v.status, v.escalate, v.escalate_reason
                                    FROM verdict v JOIN requirement r ON r.id = v.requirement_id WHERE v.assessment_id = %s""",
                                 (assessment_id,)).fetchall()
@@ -376,13 +380,15 @@ def trace(assessment_id: int, profile_id: int):
 
 
 @router.get("/jobs/{job_id}")
-def job(job_id: int):
+def job(job_id: int, profile_id: int = Depends(current_profile)):
+    """Only this supplier's own jobs. Shared jobs such as imports are not visible, and errors are cut to their last line."""
     with connect() as conn:
-        j = conn.execute("SELECT id, kind, payload, status, attempts, last_error, created_at, finished_at FROM job WHERE id = %s",
-                         (job_id,)).fetchone()
+        j = conn.execute("""SELECT id, kind, status, attempts, last_error, created_at, finished_at FROM job
+                            WHERE id = %s AND (payload->>'profile_id')::bigint = %s""", (job_id, profile_id)).fetchone()
     if not j:
         raise HTTPException(404, "job not found")
-    return j
+    lines = (j["last_error"] or "").strip().splitlines()
+    return {**j, "last_error": lines[-1][:500] if lines else None}
 
 
 def _snippet(old: str, new: str, context: int = 4) -> tuple[str, str]:
@@ -398,19 +404,21 @@ def _snippet(old: str, new: str, context: int = 4) -> tuple[str, str]:
 
 
 @router.post("/changes/{change_id}/retry")
-def retry_change(change_id: int):
+def retry_change(change_id: int, profile_id: int = Depends(current_profile)):
     from tenderfit.changes.apply import retry_event
     with connect() as conn:
+        mine = conn.execute("""SELECT 1 FROM change_event c JOIN assessment a ON a.version_id = c.from_version_id
+                               WHERE c.id = %s AND a.profile_id = %s AND a.status = 'done' LIMIT 1""", (change_id, profile_id)).fetchone()
+        if not mine:
+            raise HTTPException(404, "change not found")
         if not retry_event(conn, change_id):
             raise HTTPException(409, "only a failed amendment can be retried")
     return {"status": "detected"}
 
 
 @router.get("/changes")
-def changes(profile_id: int | None = None, limit: int = 50):
+def changes(limit: int = Query(50, ge=1, le=200), profile_id: int = Depends(current_profile)):
     with connect() as conn:
-        if profile_id is not None and not conn.execute("SELECT 1 FROM business_profile WHERE id = %s", (profile_id,)).fetchone():
-            raise HTTPException(404, "profile not found")
         # Scope first and limit afterwards, so other suppliers' events never use up this supplier's page.
         events = conn.execute(
             """SELECT c.*, o.title AS opportunity, b.name AS buyer, fv.published_at AS from_published, tv.published_at AS to_published,
@@ -420,7 +428,7 @@ def changes(profile_id: int | None = None, limit: int = 50):
                LEFT JOIN notice_version fv ON fv.id = c.from_version_id LEFT JOIN notice_version tv ON tv.id = c.to_version_id
                LEFT JOIN notice_version_numbered fn ON fn.id = c.from_version_id
                LEFT JOIN notice_version_numbered tn ON tn.id = c.to_version_id
-               WHERE %(p)s::bigint IS NULL
+               WHERE (c.kind = 'profile' AND (c.summary->>'profile_id')::bigint = %(p)s)
                   OR EXISTS (SELECT 1 FROM change_impact i WHERE i.change_id = c.id AND i.profile_id = %(p)s)
                   OR (c.kind = 'version' AND c.status <> 'applied' AND EXISTS (
                         SELECT 1 FROM assessment a WHERE a.version_id = c.from_version_id AND a.profile_id = %(p)s AND a.status = 'done'))
@@ -433,8 +441,8 @@ def changes(profile_id: int | None = None, limit: int = 50):
                       aa.recommendation AS after_recommendation
                FROM change_impact i JOIN lot l ON l.id = i.lot_id
                LEFT JOIN assessment ab ON ab.id = i.before_assessment_id LEFT JOIN assessment aa ON aa.id = i.after_assessment_id
-               WHERE i.change_id = ANY(%s) AND (%s::bigint IS NULL OR i.profile_id = %s) ORDER BY l.lot_no, i.id""",
-            ([e["id"] for e in events], profile_id, profile_id)).fetchall()
+               WHERE i.change_id = ANY(%s) AND i.profile_id = %s ORDER BY l.lot_no, i.id""",
+            ([e["id"] for e in events], profile_id)).fetchall()
         ids = {x for e in events for p in e["passages"] for x in (p.get("old_id"), p.get("new_id")) if x}
         texts = {r["id"]: r["text"] for r in conn.execute("SELECT id, text FROM passage WHERE id = ANY(%s)", (list(ids),))}
     for e in events:

@@ -1,8 +1,6 @@
 """An amendment counts as applied only when its processing finished; retries are safe and leave no duplicates."""
 import pytest
-from fastapi.testclient import TestClient
 
-from tenderfit.api.main import app
 from tenderfit.assessment.pipeline import assess_lot
 from tenderfit.changes import apply as changes
 from tenderfit.changes.apply import ChangeProcessingError, pending_version_changes, process_pending
@@ -11,6 +9,7 @@ from tenderfit.ingest.importer import run_import
 from tenderfit.llm import LLMError
 from tenderfit.profile.seed import seed
 from tests import northfield
+from tests.conftest import as_supplier
 from tests.fakes import ScriptedLLM
 from tests.test_importer import NOW, T0, T1, fake
 from tests.test_pipeline import TODAY, portal, verdicts
@@ -117,8 +116,8 @@ def test_exhausted_attempts_stop_retrying_until_a_person_asks(world):
             process_pending(db, flaky, http=portal(V2), **KW)
     assert pending_version_changes(db) == []
     ev = db.execute("SELECT * FROM change_event WHERE kind = 'version'").fetchone()
-    with TestClient(app) as c:
-        listed = c.get("/changes", params={"profile_id": ids["Atlas Furniture"]}).json()
+    with as_supplier(db, ids["Atlas Furniture"]) as c:
+        listed = c.get("/changes").json()
         assert listed[0]["status"] == "failed" and "overloaded" in listed[0]["last_error"]
         assert c.post(f"/changes/{ev['id']}/retry").status_code == 200
         assert c.post(f"/changes/{ev['id']}/retry").status_code == 409
@@ -137,8 +136,8 @@ def test_sequence_v1_v2_v3(world):
     vs = {r["statement"]: r["status"] for r in db.execute(
         "SELECT r.statement, v.status FROM verdict v JOIN requirement r ON r.id = v.requirement_id WHERE v.assessment_id = %s", (a["id"],))}
     assert vs["Deliver all desks within 30 days of order"] == "not_met", "v3 restored the original 30 days"
-    with TestClient(app) as c:
-        listed = c.get("/changes", params={"profile_id": ids["Atlas Furniture"]}).json()
+    with as_supplier(db, ids["Atlas Furniture"]) as c:
+        listed = c.get("/changes").json()
     assert sorted((e["from_version_no"], e["to_version_no"]) for e in listed) == [(1, 2), (2, 3)]
 
 

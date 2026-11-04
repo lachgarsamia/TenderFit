@@ -1,19 +1,21 @@
 import sys
 from pathlib import Path
+from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
 
 from tenderfit.config import settings
 
+Conn = psycopg.Connection[dict[str, Any]]
 MIGRATIONS = Path(__file__).resolve().parent.parent / "migrations"
 
 
-def connect(url: str | None = None) -> psycopg.Connection:
+def connect(url: str | None = None) -> Conn:
     return psycopg.connect(url or settings.database_url, row_factory=dict_row)
 
 
-def migrate(conn: psycopg.Connection) -> list[str]:
+def migrate(conn: Conn) -> list[str]:
     conn.execute("SELECT pg_advisory_xact_lock(42)")
     conn.execute("CREATE TABLE IF NOT EXISTS schema_migration (name text PRIMARY KEY, applied_at timestamptz DEFAULT now())")
     done = {r["name"] for r in conn.execute("SELECT name FROM schema_migration")}

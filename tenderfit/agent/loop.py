@@ -239,7 +239,7 @@ def run_agent(conn: psycopg.Connection, assessment_id: int, version_id: int, req
                             citations=[(req["passage_id"], req["quote"])], escalate=["model error"]), tools
         budget.spend(turn.usage.cost_usd, turn.usage.input_tokens + turn.usage.output_tokens)
         log_call(conn, "agent", AGENT_VERSION, turn.usage, {"version_id": version_id, "requirement_id": req["id"],
-                                                             "assessment_id": assessment_id})
+                                                             "assessment_id": assessment_id, "profile_id": profile_id})
         messages.append({"role": "assistant", "content": turn.raw_content})
         if not turn.calls:
             messages.append({"role": "user", "content": "Use a tool. Finish with record_verdict or raise_question."})

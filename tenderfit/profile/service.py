@@ -1,7 +1,10 @@
 import hashlib
 import io
+import math
+import re
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import docx
 import psycopg
@@ -9,9 +12,133 @@ import pymupdf
 from psycopg.types.json import Jsonb
 
 from tenderfit.config import settings
+from tenderfit.db import Conn
 from tenderfit.documents.text import QUOTE_THRESHOLD, quote_score
 from tenderfit.profile.validity import FactView, daily_status, default_confirm_by
 from tenderfit.profile.verify import verify_fact_evidence
+from tenderfit.rules.engine import insurance_type_in
+
+
+class ProfileError(ValueError):
+    """Bad input for a profile or fact; the message is safe to show to the person who sent it."""
+
+
+def _clean_profile(name: str, regions: list[str]) -> tuple[str, list[str]]:
+    name = name.strip()
+    if len(name) < 2:
+        raise ProfileError("enter the supplier's name")
+    bad = [r for r in regions if not re.fullmatch(r"[A-Z]{2,3}[A-Z0-9]{0,3}", r)]
+    if bad:
+        raise ProfileError(f"regions must be ITL codes such as UKE; not {', '.join(bad)}")
+    return name, regions
+
+
+def create_profile(conn: Conn, name: str, regions: list[str], description: str) -> int:
+    name, regions = _clean_profile(name, regions)
+    if conn.execute("SELECT 1 FROM business_profile WHERE lower(name) = lower(%s)", (name,)).fetchone():
+        raise ProfileError("a supplier with that name already exists; ask its owner for access")
+    row = conn.execute("""INSERT INTO business_profile (name, regions, description, is_fictional) VALUES (%s, %s, %s, false)
+                          RETURNING id""", (name, regions, description)).fetchone()
+    assert row is not None
+    return row["id"]
+
+
+def edit_profile(conn: Conn, profile_id: int, name: str, regions: list[str], description: str) -> None:
+    name, regions = _clean_profile(name, regions)
+    if conn.execute("SELECT 1 FROM business_profile WHERE lower(name) = lower(%s) AND id <> %s", (name, profile_id)).fetchone():
+        raise ProfileError("another supplier already uses that name")
+    conn.execute("UPDATE business_profile SET name = %s, regions = %s, description = %s WHERE id = %s", (name, regions, description, profile_id))
+
+
+FACT_FIELDS: dict[str, dict[str, type | tuple[type, ...]]] = {
+    "product": {"name": str, "code": str, "category": str, "cpv": list},
+    "service": {"service": str},
+    "region": {"itl": list, "names": list},
+    "capacity": {"max_units": (int, float), "lead_days": (int, float), "scope": str, "teams": (int, float)},
+    "workload": {"note": str},
+    "staff": {"count": (int, float)},
+    "experience": {"description": str, "units": (int, float), "end": str, "reference_letter": bool, "scope": str},
+    "registration": {"company_number": str},
+    "test_report": {"standard": str, "product": str},
+    "certificate": {"standard": str, "scope": str},
+    "insurance": {"type": str, "amount_gbp": (int, float)},
+    "financial": {"turnover_gbp": (int, float)},
+}
+FACT_REQUIRED = {"product": "name", "service": "service", "region": "itl", "experience": "description", "test_report": "standard",
+                 "certificate": "standard", "insurance": "type", "registration": "company_number"}
+USER_STATUSES = {"declared", "missing", "unknown"}
+
+
+def clean_fact(attribute: str, label: str, value: dict) -> tuple[str, dict]:
+    """Facts drive deterministic rules, so their shape is checked here, with messages a person can act on."""
+    if attribute not in FACT_FIELDS:
+        raise ProfileError(f"unknown kind of fact: {attribute}")
+    label = label.strip()
+    if not label:
+        raise ProfileError("give this fact a short description")
+    fields = FACT_FIELDS[attribute]
+    out: dict[str, Any] = {}
+    for key, v in value.items():
+        if key not in fields:
+            raise ProfileError(f"{attribute} facts have no field called {key}")
+        if v in (None, "", []):
+            continue
+        if not isinstance(v, fields[key]) or (isinstance(v, bool) and fields[key] is not bool):
+            raise ProfileError(f"{key} has the wrong type")
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and (not math.isfinite(v) or v < 0):
+            raise ProfileError(f"{key} must be zero or more")
+        out[key] = v
+    needed = FACT_REQUIRED.get(attribute)
+    if needed and needed not in out:
+        raise ProfileError(f"{attribute} facts need {needed}")
+    if "end" in out:
+        try:
+            date.fromisoformat(out["end"])
+        except ValueError as e:
+            raise ProfileError("end must be a date such as 2025-06-30") from e
+    if attribute == "insurance" and not insurance_type_in(out["type"]):
+        raise ProfileError("insurance type must be public liability, employers liability, professional indemnity or product liability")
+    if attribute == "insurance":
+        out["type"] = (insurance_type_in(out["type"]) or "").replace(" ", "_")
+    return label, out
+
+
+def owned_fact(conn: Conn, fact_id: int, profile_id: int) -> dict | None:
+    """Every operation on a fact goes through this, so a fact id alone never reaches another supplier's data."""
+    return conn.execute("SELECT * FROM profile_fact WHERE id = %s AND profile_id = %s", (fact_id, profile_id)).fetchone()
+
+
+def add_declared_fact(conn: Conn, profile_id: int, attribute: str, label: str, value: dict, evidence_status: str = "declared",
+                      valid_until: date | None = None) -> int:
+    if evidence_status not in USER_STATUSES:
+        raise ProfileError("a fact can only become document-backed through a checked document")
+    label, value = clean_fact(attribute, label, value)
+    return add_fact(conn, profile_id, attribute, label, value, evidence_status, "entered by supplier",
+                    confirmed_at=date.today() if evidence_status == "declared" else None, valid_until=valid_until)
+
+
+def edit_fact(conn: Conn, fact_id: int, profile_id: int, label: str | None, value: dict | None, evidence_status: str | None,
+              valid_until: date | None, clear_expiry: bool = False) -> dict:
+    """Editing what a fact says detaches it from documents that proved the old value: they no longer prove this one."""
+    fact = owned_fact(conn, fact_id, profile_id)
+    if fact is None:
+        raise ProfileError("fact not found")
+    if evidence_status is not None and evidence_status not in USER_STATUSES:
+        raise ProfileError("a fact can only become document-backed through a checked document")
+    new_label, new_value = clean_fact(fact["attribute"], label if label is not None else fact["label"],
+                                      value if value is not None else fact["value"])
+    changed = new_value != fact["value"]
+    status = evidence_status or fact["evidence_status"]
+    detached = False
+    if changed and fact["evidence_status"] == "document_on_file":
+        status, detached = "declared", True
+        conn.execute("UPDATE fact_support SET verified = false WHERE fact_id = %s", (fact_id,))
+    until = None if clear_expiry else (valid_until if valid_until is not None else fact["valid_until"])
+    conn.execute(
+        """UPDATE profile_fact SET label = %s, value = %s, evidence_status = %s, valid_until = %s, confirmed_at = now()::date,
+                  confirm_by = %s, needs_update_reason = NULL, updated_at = now() WHERE id = %s""",
+        (new_label, Jsonb(new_value), status, until, default_confirm_by(fact["attribute"], date.today()), fact_id))
+    return {"detached_from_documents": detached, "verdicts": verdicts_using(conn, [fact_id])}
 
 
 def upsert_profile(conn: psycopg.Connection, name: str, regions: list[str], description: str,
@@ -62,7 +189,10 @@ def add_evidence(conn: psycopg.Connection, profile_id: int, kind: str, filename:
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"{sha}{Path(filename).suffix}"
     path.write_bytes(content)
-    pages = _pages(content, filename)
+    try:
+        pages = _pages(content, filename)
+    except Exception as e:  # corrupt uploads surface as a clear refusal, whichever parser met them
+        raise ProfileError(f"this file could not be read ({type(e).__name__}); it may be damaged") from e
     eid = conn.execute(
         """INSERT INTO evidence_file (profile_id, kind, issuer, issued_on, expires_on, sha256, filename, storage_path, page_count)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
@@ -86,6 +216,10 @@ def _verify(conn: psycopg.Connection, fact_id: int, evidence_file_id: int, quote
 
 def link_support(conn: psycopg.Connection, fact_id: int, evidence_file_id: int, page: int, quote: str) -> bool:
     """Link a file to a fact. The fact counts as document-backed only if the quote is in the file and nothing in it contradicts the fact."""
+    same = conn.execute("""SELECT 1 FROM profile_fact f JOIN evidence_file e ON e.profile_id = f.profile_id
+                           WHERE f.id = %s AND e.id = %s""", (fact_id, evidence_file_id)).fetchone()
+    if not same:
+        raise ProfileError("that file and that fact belong to different suppliers")
     row = conn.execute("SELECT text FROM evidence_page WHERE evidence_file_id = %s AND page = %s",
                        (evidence_file_id, page)).fetchone()
     score = quote_score(quote, row["text"]) if row else 0.0

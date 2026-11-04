@@ -72,6 +72,7 @@ def _before_after(conn) -> dict[tuple, str]:
 
 def run_mutation(mut: Mutation, mode: str, today: date) -> dict:
     """mode: full, static or dynamic."""
+    settings.demo_scripted_llm = True
     url = _fresh()
     with connect(url) as conn:
         demo.load(conn, argparse.Namespace(fast=True))

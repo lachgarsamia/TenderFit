@@ -1,8 +1,6 @@
 """Failure injection: whatever breaks during a new run, the last completed assessment stays readable."""
 import pytest
-from fastapi.testclient import TestClient
 
-from tenderfit.api.main import app
 from tenderfit.assessment import pipeline
 from tenderfit.assessment.pipeline import assess_lot, recover_stale_assessments
 from tenderfit.documents import service
@@ -11,6 +9,7 @@ from tenderfit.jobs import queue
 from tenderfit.llm import LLMError
 from tenderfit.profile.seed import seed
 from tests import northfield
+from tests.conftest import as_supplier
 from tests.fakes import ScriptedLLM
 from tests.test_importer import NOW, T0, T1, fake
 from tests.test_pipeline import TODAY, portal, verdicts
@@ -49,8 +48,8 @@ def fresh_doc(db):
 
 
 def assert_previous_survives(db, lot, atlas, good, stage):
-    with TestClient(app) as c:
-        a = c.get(f"/lots/{lot}/assessment", params={"profile_id": atlas}).json()
+    with as_supplier(db, atlas) as c:
+        a = c.get(f"/lots/{lot}/assessment").json()
     assert a["assessment_id"] == good and a["dimensions"] is not None
     assert a["processing"] is None and a["last_failure"]["stage"] == stage
     failed = db.execute("SELECT status, superseded, error, finished_at FROM assessment WHERE id > %s", (good,)).fetchone()
@@ -119,8 +118,8 @@ def test_running_assessment_is_never_served_as_result(world):
                   SELECT profile_id, lot_id, version_id, 'running', '{"stage": "assessment", "done": 2, "total": 5}'
                   FROM assessment WHERE id = %s""", (good,))
     db.commit()
-    with TestClient(app) as c:
-        a = c.get(f"/lots/{lot}/assessment", params={"profile_id": atlas}).json()
+    with as_supplier(db, atlas) as c:
+        a = c.get(f"/lots/{lot}/assessment").json()
     assert a["assessment_id"] == good and a["dimensions"]["eligibility"]
     assert (a["processing"]["status"], a["processing"]["stage"], a["processing"]["done"]) == ("running", "assessment", 2)
     with pytest.raises(Exception):  # the database refuses a second running row
@@ -135,15 +134,15 @@ def test_first_run_failure_returns_status_not_a_crash(db, _test_db, tmp_path, mo
     atlas = seed(db)["Atlas Furniture"]
     run_import(db, fake([northfield.release()]), T0, T1, now=NOW)
     lot = db.execute("SELECT id FROM lot WHERE lot_no = '1'").fetchone()["id"]
-    with TestClient(app) as c:
-        assert c.get(f"/lots/{lot}/assessment", params={"profile_id": atlas}).status_code == 404
+    with as_supplier(db, atlas) as c:
+        assert c.get(f"/lots/{lot}/assessment").status_code == 404
     monkeypatch.setattr(pipeline.docs, "process_version", boom)
     with pytest.raises(Boom):
         assess_lot(db, lot, atlas, ScriptedLLM(verdicts), today=TODAY, emb=BagEmbedder(), rr=OverlapReranker())
-    with TestClient(app) as c:
-        a = c.get(f"/lots/{lot}/assessment", params={"profile_id": atlas})
+    with as_supplier(db, atlas) as c:
+        a = c.get(f"/lots/{lot}/assessment")
         assert a.status_code == 200 and a.json()["assessment_id"] is None and a.json()["last_failure"]["stage"] == "documents"
-        assert c.get(f"/lots/{lot}/preparation", params={"profile_id": atlas}).status_code == 404
+        assert c.get(f"/lots/{lot}/preparation").status_code == 404
 
 
 def test_stale_running_row_is_recovered_and_new_attempt_closes_old_one(world):
@@ -159,11 +158,11 @@ def test_stale_running_row_is_recovered_and_new_attempt_closes_old_one(world):
 
 def test_duplicate_assess_clicks_share_one_waiting_job(world):
     db, lot, atlas, kw, good = world
-    with TestClient(app) as c:
-        a = c.post(f"/lots/{lot}/assess", json={"profile_id": atlas}).json()["jobs"]
-        b = c.post(f"/lots/{lot}/assess", json={"profile_id": atlas}).json()["jobs"]
+    with as_supplier(db, atlas) as c:
+        a = c.post(f"/lots/{lot}/assess", json={}).json()["jobs"]
+        b = c.post(f"/lots/{lot}/assess", json={}).json()["jobs"]
         assert a == b
-        state = c.get(f"/lots/{lot}/assessment", params={"profile_id": atlas}).json()["processing"]
+        state = c.get(f"/lots/{lot}/assessment").json()["processing"]
         assert state["status"] == "queued" and state["job_id"] == a[0]
 
 

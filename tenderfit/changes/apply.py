@@ -398,6 +398,8 @@ def apply_profile_change(conn: psycopg.Connection, lot_id: int, profile_id: int,
                         AND status = 'done' ORDER BY id DESC LIMIT 1""", (lot_id, profile_id)).fetchone()
     if not a:
         return None
+    # A job can only act on the facts of the supplier it names, whatever else its payload lists.
+    fact_ids = [r["id"] for r in conn.execute("SELECT id FROM profile_fact WHERE id = ANY(%s) AND profile_id = %s", (fact_ids, profile_id))]
     change = Change(cls="local")
     plan = plan_reassessment(change, load_deps(conn, a["id"]), facts=set(fact_ids))
     before = _verdicts(conn, a["id"])
