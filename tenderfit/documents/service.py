@@ -3,14 +3,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-import psycopg
+from psycopg.types.json import Jsonb
 
 from tenderfit.config import settings
+from tenderfit.db import Conn, must
 from tenderfit.documents import passages as ps
 from tenderfit.documents import references
 from tenderfit.documents.fetch import Fetched, fetch, sniff_type
 from tenderfit.documents.inventory import NAMED_TO_TYPE, RefState, coverage, is_essential, notice_blocks
-from tenderfit.documents.parse import parse
+from tenderfit.documents.parse import OCR_NOTE, page_ranges, parse
 
 
 def _store_bytes(content: bytes, sha: str, ext: str) -> str:
@@ -22,7 +23,7 @@ def _store_bytes(content: bytes, sha: str, ext: str) -> str:
     return str(path)
 
 
-def _insert_passages(conn: psycopg.Connection, doc_id: int, items: list[ps.Passage]) -> int:
+def _insert_passages(conn: Conn, doc_id: int, items: list[ps.Passage]) -> int:
     for p in items:
         conn.execute(
             "INSERT INTO passage (document_id, ordinal, page, section, text, sha256, kind) VALUES (%s, %s, %s, %s, %s, %s, %s)",
@@ -31,18 +32,18 @@ def _insert_passages(conn: psycopg.Connection, doc_id: int, items: list[ps.Passa
     return len(items)
 
 
-def ensure_inventory(conn: psycopg.Connection, version_id: int) -> None:
+def ensure_inventory(conn: Conn, version_id: int) -> None:
     if conn.execute("SELECT 1 FROM document_ref WHERE version_id = %s LIMIT 1", (version_id,)).fetchone():
         return
-    v = conn.execute(
+    v = must(conn.execute(
         """SELECT nv.fields, nv.source_url, rr.payload FROM notice_version nv
-           JOIN raw_release rr ON rr.id = nv.raw_release_id WHERE nv.id = %s""", (version_id,)).fetchone()
+           JOIN raw_release rr ON rr.id = nv.raw_release_id WHERE nv.id = %s""", (version_id,)).fetchone())
     release = json.loads(v["payload"])
-    doc_id = conn.execute(
+    doc_id = must(conn.execute(
         """INSERT INTO document (version_id, url, origin, access, filename, retrieved_at, note)
            VALUES (%s, %s, 'source', 'read', 'Tender notice', now(), 'notice fields') RETURNING id""",
         (version_id, v["source_url"]),
-    ).fetchone()["id"]
+    ).fetchone())["id"]
     items = ps.build(notice_blocks(release))
     for p in items:
         p.kind = "field"
@@ -70,27 +71,32 @@ def ensure_inventory(conn: psycopg.Connection, version_id: int) -> None:
         )
 
 
-def _record_document(conn: psycopg.Connection, version_id: int, f: Fetched, url: str | None, origin: str,
+def _record_document(conn: Conn, version_id: int, f: Fetched, url: str | None, origin: str,
                      uploaded_by: str | None = None, owner: int | None = None) -> tuple[int, str, str | None]:
     ext = sniff_type(f.content, f.content_type or "", f.filename)
     parsed = parse(f.content, ext or "")
     access = "read" if not parsed.unreadable else "unreadable"
     note = parsed.unreadable or f"{len(parsed.blocks)} blocks"
-    doc_id = conn.execute(
+    state = access
+    if not parsed.unreadable and parsed.ocr_pages:
+        # Its readable pages are used, but the document does not count as read: the rest was never seen.
+        state = "partial"
+        note = f"pages {page_ranges(parsed.ocr_pages)} of {parsed.page_count} are images and need OCR; {OCR_NOTE}"
+    doc_id = must(conn.execute(
         """INSERT INTO document (version_id, url, sha256, origin, access, retrieved_at, filename, content_type,
-                                 page_count, note, storage_path, uploaded_by, owner_profile_id)
-           VALUES (%s, %s, %s, %s, %s, now(), %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                                 page_count, note, storage_path, uploaded_by, owner_profile_id, page_status, ocr_pages)
+           VALUES (%s, %s, %s, %s, %s, now(), %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
         (version_id, url, f.sha256, origin, access, f.filename, f.content_type, parsed.page_count, note,
-         _store_bytes(f.content, f.sha256, ext or ".bin"), uploaded_by, owner),
-    ).fetchone()["id"]
+         _store_bytes(f.content, f.sha256, ext or ".bin"), uploaded_by, owner, Jsonb(parsed.pages), parsed.ocr_pages),
+    ).fetchone())["id"]
     if access == "read":
         items = ps.build(parsed.blocks)
         _insert_passages(conn, doc_id, items)
         _add_referenced(conn, version_id, doc_id, items, owner)
-    return doc_id, access, parsed.unreadable
+    return doc_id, state, note if state == "partial" else parsed.unreadable
 
 
-def _add_referenced(conn: psycopg.Connection, version_id: int, doc_id: int, items: list[ps.Passage], owner: int | None = None) -> None:
+def _add_referenced(conn: Conn, version_id: int, doc_id: int, items: list[ps.Passage], owner: int | None = None) -> None:
     existing = conn.execute(
         """SELECT r.label, r.ocds_type, d.filename FROM document_ref r LEFT JOIN document d ON d.id = r.document_id
            WHERE r.version_id = %s AND (r.owner_profile_id IS NULL OR r.owner_profile_id = %s)""", (version_id, owner)).fetchall()
@@ -116,20 +122,20 @@ def _add_referenced(conn: psycopg.Connection, version_id: int, doc_id: int, item
             names += " " + low
 
 
-def _copy_document(conn: psycopg.Connection, version_id: int, document_id: int) -> int:
-    doc = conn.execute(
+def _copy_document(conn: Conn, version_id: int, document_id: int) -> int:
+    doc = must(conn.execute(
         """INSERT INTO document (version_id, url, sha256, origin, access, retrieved_at, filename, content_type, page_count,
-                                 note, storage_path, uploaded_by, owner_profile_id)
+                                 note, storage_path, uploaded_by, owner_profile_id, page_status, ocr_pages)
            SELECT %s, url, sha256, origin, access, retrieved_at, filename, content_type, page_count,
-                  'carried from previous version', storage_path, uploaded_by, owner_profile_id FROM document WHERE id = %s RETURNING id""",
-        (version_id, document_id)).fetchone()["id"]
+                  'carried from previous version', storage_path, uploaded_by, owner_profile_id, page_status, ocr_pages FROM document WHERE id = %s RETURNING id""",
+        (version_id, document_id)).fetchone())["id"]
     conn.execute("""INSERT INTO passage (document_id, ordinal, page, section, text, sha256, kind, embedding)
                     SELECT %s, ordinal, page, section, text, sha256, kind, embedding FROM passage WHERE document_id = %s""",
                  (doc, document_id))
     return doc
 
 
-def inherit_from_previous(conn: psycopg.Connection, version_id: int) -> int:
+def inherit_from_previous(conn: Conn, version_id: int) -> int:
     """User uploads and 'buyer issued none' confirmations carry to the next version of the same notice, for their owner."""
     prev = conn.execute(
         """SELECT p.id FROM notice_version v JOIN notice_version p ON p.ocid = v.ocid
@@ -188,13 +194,13 @@ def inherit_from_previous(conn: psycopg.Connection, version_id: int) -> int:
     return n
 
 
-def process_version(conn: psycopg.Connection, version_id: int, http: httpx.Client | None = None) -> dict:
+def process_version(conn: Conn, version_id: int, http: httpx.Client | None = None) -> dict:
     ensure_inventory(conn, version_id)
     out = {"read": 0, "unreadable": 0, "not_retrieved": 0}
     refs = conn.execute(
         "SELECT * FROM document_ref WHERE version_id = %s AND kind = 'document' AND status = 'not_retrieved' AND url IS NOT NULL",
         (version_id,)).fetchall()
-    cache: dict[str, tuple[int, str, str | None]] = {}
+    cache: dict[str, tuple[int | None, str, str | None]] = {}
     for r in refs:
         if r["url"] not in cache:
             f = fetch(r["url"], http)
@@ -203,8 +209,8 @@ def process_version(conn: psycopg.Connection, version_id: int, http: httpx.Clien
             else:
                 cache[r["url"]] = (None, "not_retrieved", f.note)
         doc_id, access, note = cache[r["url"]]
-        status = {"read": "read", "unreadable": "unreadable"}.get(access, "not_retrieved")
-        out[status] += 1
+        status = {"read": "read", "partial": "partial", "unreadable": "unreadable"}.get(access, "not_retrieved")
+        out[status] = out.get(status, 0) + 1
         conn.execute("UPDATE document_ref SET status = %s, document_id = %s, note = %s WHERE id = %s",
                      (status, doc_id, note, r["id"]))
     if not conn.execute("SELECT 1 FROM document WHERE version_id = %s AND note = 'carried from previous version' LIMIT 1",
@@ -214,7 +220,7 @@ def process_version(conn: psycopg.Connection, version_id: int, http: httpx.Clien
     return out
 
 
-def attach_upload(conn: psycopg.Connection, version_id: int, filename: str, content: bytes, user: str,
+def attach_upload(conn: Conn, version_id: int, filename: str, content: bytes, user: str,
                   ref_id: int | None = None, profile_id: int | None = None) -> dict:
     """With a profile the file is private to that supplier. Without one it joins the public pack (operator or dataset use)."""
     ensure_inventory(conn, version_id)
@@ -224,7 +230,7 @@ def attach_upload(conn: psycopg.Connection, version_id: int, filename: str, cont
                                    (ref_id, version_id, profile_id)).fetchone():
         raise ValueError("document reference not found")
     doc_id, access, note = _record_document(conn, version_id, f, None, "upload", user, profile_id)
-    status = "read" if access == "read" else "unreadable"
+    status = access if access in ("read", "partial") else "unreadable"
     if profile_id is not None:
         if ref_id:
             conn.execute(
@@ -234,30 +240,30 @@ def attach_upload(conn: psycopg.Connection, version_id: int, filename: str, cont
                        note = EXCLUDED.note, decided_by = EXCLUDED.decided_by""",
                 (ref_id, profile_id, status, doc_id, note or f"uploaded by {user}", user))
         else:
-            ref_id = conn.execute(
+            ref_id = must(conn.execute(
                 """INSERT INTO document_ref (version_id, label, kind, status, document_id, essential, referenced_in, note, owner_profile_id)
                    VALUES (%s, %s, 'document', %s, %s, %s, 'uploaded by user', %s, %s) RETURNING id""",
-                (version_id, filename, status, doc_id, is_essential(None, filename), note or f"uploaded by {user}", profile_id)).fetchone()["id"]
+                (version_id, filename, status, doc_id, is_essential(None, filename), note or f"uploaded by {user}", profile_id)).fetchone())["id"]
         conn.commit()
         return {"document_id": doc_id, "ref_id": ref_id, "status": status, "note": note}
     if ref_id:
         conn.execute("UPDATE document_ref SET status = %s, document_id = %s, note = %s WHERE id = %s AND version_id = %s",
                      (status, doc_id, note or f"uploaded by {user}", ref_id, version_id))
     else:
-        ref_id = conn.execute(
+        ref_id = must(conn.execute(
             """INSERT INTO document_ref (version_id, label, kind, status, document_id, essential, referenced_in, note)
                VALUES (%s, %s, 'document', %s, %s, %s, 'uploaded by user', %s) RETURNING id""",
             (version_id, filename, status, doc_id, is_essential(None, filename), note or f"uploaded by {user}"),
-        ).fetchone()["id"]
+        ).fetchone())["id"]
     conn.commit()
     return {"document_id": doc_id, "ref_id": ref_id, "status": status, "note": note}
 
 
-def inventory(conn: psycopg.Connection, version_id: int, profile_id: int | None = None) -> dict:
+def inventory(conn: Conn, version_id: int, profile_id: int | None = None) -> dict:
     """The public pack, plus this supplier's own uploads and decisions when a profile is given."""
     refs = conn.execute(
         """SELECT r.*, coalesce(s.status, r.status) AS status, coalesce(s.document_id, r.document_id) AS document_id,
-                  coalesce(s.note, r.note) AS note, d.filename, d.origin,
+                  coalesce(s.note, r.note) AS note, d.filename, d.origin, d.page_count, d.ocr_pages,
                   (SELECT count(*) FROM passage p WHERE p.document_id = coalesce(s.document_id, r.document_id)) passages
            FROM document_ref r LEFT JOIN document_ref_state s ON s.ref_id = r.id AND s.profile_id = %(p)s
            LEFT JOIN document d ON d.id = coalesce(s.document_id, r.document_id)
@@ -266,5 +272,6 @@ def inventory(conn: psycopg.Connection, version_id: int, profile_id: int | None 
     cov = coverage([RefState(r["kind"], r["essential"], r["status"]) for r in refs])
     essential = [r for r in refs if r["essential"] and r["kind"] != "notice"]
     return {"coverage": cov, "essential_read": sum(r["status"] == "read" for r in essential),
+            "needs_ocr": [r["label"] for r in refs if r["ocr_pages"]],
             "essential_total": len(essential), "documents": refs,
             "checked_at": datetime.now(timezone.utc)}

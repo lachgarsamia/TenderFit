@@ -1,11 +1,16 @@
 import io
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import docx
 import pymupdf
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 
 MIN_TEXT_CHARS = 200
+MIN_PAGE_CHARS = 40          # fewer than this is a page number or a stamp, not a page of text
+MIN_VISUAL_COVERAGE = 0.2   # share of a page covered by images or drawings before it counts as a scan
+OCR_NOTE = "OCR is not available in this version"
 HEADING = re.compile(
     r"^(?:(?:section|part)\s+\d+[a-z]?|(?:appendix|annex|schedule|annexe)\s+[a-z0-9]{1,3}\b|\d{1,2}(?:\.\d{1,2}){0,3}\.?)\s*[-:–.]?\s+\S",
     re.I,
@@ -28,6 +33,11 @@ class Parsed:
     blocks: list[Block]
     page_count: int | None
     unreadable: str | None = None
+    pages: list[dict] = field(default_factory=list)  # per page: {"page", "chars", "status": text|needs_ocr|blank}
+
+    @property
+    def ocr_pages(self) -> list[int]:
+        return [p["page"] for p in self.pages if p["status"] == "needs_ocr"]
 
 
 def is_heading(text: str) -> bool:
@@ -46,11 +56,43 @@ def _styled_heading(text: str, size: float, bold: bool, body_size: float) -> boo
     return (bold or size >= body_size + 1.5) and any(c.isalpha() for c in t)
 
 
+def _visual_coverage(page) -> float:
+    """Share of the page under images or filled drawings. A scan is one big image; some scanners produce vector fills."""
+    area = abs(page.rect) or 1.0
+    boxes = [pymupdf.Rect(i["bbox"]) for i in page.get_image_info()]
+    boxes += [pymupdf.Rect(d["rect"]) for d in page.get_drawings() if d.get("fill") is not None]
+    return min(1.0, sum(abs(b & page.rect) for b in boxes) / area)
+
+
+def _page_status(page) -> dict:
+    chars = len("".join(page.get_text().split()))
+    if chars >= MIN_PAGE_CHARS:
+        status = "text"
+    else:
+        status = "needs_ocr" if _visual_coverage(page) >= MIN_VISUAL_COVERAGE else "blank"
+    return {"page": page.number + 1, "chars": chars, "status": status}
+
+
+def page_ranges(pages: list[int]) -> str:
+    """[2, 3, 4, 9] becomes '2-4, 9'."""
+    out: list[str] = []
+    for p in sorted(pages):
+        if out and out[-1].split("-")[-1] == str(p - 1):
+            out[-1] = f"{out[-1].split('-')[0]}-{p}"
+        else:
+            out.append(str(p))
+    return ", ".join(out)
+
+
 def parse_pdf(content: bytes) -> Parsed:
     doc = pymupdf.open(stream=content, filetype="pdf")
+    if doc.needs_pass:
+        return Parsed([], doc.page_count, "the PDF is password-protected, so it could not be read; upload an unprotected copy")
     pages = []
     sizes: list[float] = []
-    for page in doc:
+    page_info = []
+    for page in doc.pages():
+        page_info.append(_page_status(page))
         try:
             tables = list(page.find_tables())
         except Exception:
@@ -85,9 +127,15 @@ def parse_pdf(content: bytes) -> Parsed:
                 last.text += "\n" + text
             else:
                 blocks.append(Block(text, pno, heading=heading, table=table))
+    needs_ocr = [p["page"] for p in page_info if p["status"] == "needs_ocr"]
+    text_pages = [p for p in page_info if p["status"] == "text"]
+    if not text_pages and needs_ocr:
+        return Parsed([], doc.page_count, f"every page is an image (a scanned PDF), so this needs OCR; {OCR_NOTE}", page_info)
     if sum(len(b.text) for b in blocks) < MIN_TEXT_CHARS:
-        return Parsed([], doc.page_count, "no text layer (scanned PDF?); OCR is not supported in version 1")
-    return Parsed(blocks, doc.page_count)
+        if needs_ocr:
+            return Parsed([], doc.page_count, f"almost all of this is images, so it needs OCR (pages {page_ranges(needs_ocr)}); {OCR_NOTE}", page_info)
+        return Parsed([], doc.page_count, "the document has almost no text", page_info)
+    return Parsed(blocks, doc.page_count, None, page_info)
 
 
 def parse_docx(content: bytes) -> Parsed:
@@ -97,14 +145,14 @@ def parse_docx(content: bytes) -> Parsed:
     for child in body.iterchildren():
         tag = child.tag.rsplit("}", 1)[-1]
         if tag == "p":
-            p = docx.text.paragraph.Paragraph(child, d)
+            p = Paragraph(child, d)
             text = p.text.strip()
             if not text:
                 continue
             style = (p.style.name if p.style is not None else "").lower()
             blocks.append(Block(text, None, heading=style.startswith(("heading", "title")) or is_heading(text)))
         elif tag == "tbl":
-            t = docx.table.Table(child, d)
+            t = Table(child, d)
             text = _table_text([[c.text for c in r.cells] for r in t.rows])
             if text:
                 blocks.append(Block(text, None, table=True))
@@ -120,5 +168,5 @@ def parse(content: bytes, ext: str) -> Parsed:
         if ext == ".docx":
             return parse_docx(content)
     except Exception as e:
-        return Parsed([], None, f"could not parse file ({type(e).__name__})")
+        return Parsed([], None, f"the file could not be opened; it may be damaged ({type(e).__name__})")
     return Parsed([], None, f"unsupported file type {ext}")

@@ -1,9 +1,10 @@
 import re
+from typing import Any
 
-import psycopg
 from psycopg.types.json import Jsonb
 from pydantic import ValidationError
 
+from tenderfit.db import Conn, must
 from tenderfit.documents import references
 from tenderfit.documents.text import QUOTE_THRESHOLD, normalise, quote_score, words
 from tenderfit.extraction.prompts import EXTRACT_SYSTEM, EXTRACT_VERSION, extract_user
@@ -15,7 +16,9 @@ BATCH_WORDS = 3000
 
 
 def _batches(passages: list[dict]) -> list[list[dict]]:
-    out, cur, n = [], [], 0
+    out: list[list[dict]] = []
+    cur: list[dict] = []
+    n = 0
     for p in passages:
         w = words(p["text"])
         if cur and n + w > BATCH_WORDS:
@@ -68,7 +71,7 @@ def _reference_targets(label: str, passage: dict, sections: dict[int, dict[str, 
     return [pid for doc, by_section in sections.items() if doc != passage["document_id"] for pid in hits(by_section)]
 
 
-def _record_dependencies(conn: psycopg.Connection, req_id: int, version_id: int, req: Requirement, passage: dict, sections: dict,
+def _record_dependencies(conn: Conn, req_id: int, version_id: int, req: Requirement, passage: dict, sections: dict,
                          refs_by_label: dict[str, int], definitions: dict[str, int], conditions: list[dict]) -> None:
     deps = [("source", "passage", passage["id"])]
     # References in the quote or named by the extractor; a reference elsewhere in a long passage is not this requirement's.
@@ -93,7 +96,7 @@ def _record_dependencies(conn: psycopg.Connection, req_id: int, version_id: int,
             (req_id, version_id, kind, ttype, str(tid), "rule_engine" if kind == "parameter" else "extractor"))
 
 
-def _reject(conn: psycopg.Connection, version_id: int, raw: dict, kind: str, reason: str, score: float | None = None,
+def _reject(conn: Conn, version_id: int, raw: dict, kind: str, reason: str, score: float | None = None,
             passage_id: int | None = None, lot_no: str | None = None) -> None:
     conn.execute(
         """INSERT INTO requirement_rejection (version_id, passage_id, statement, quote, score, reason, kind, obligation, lot_no)
@@ -101,21 +104,22 @@ def _reject(conn: psycopg.Connection, version_id: int, raw: dict, kind: str, rea
         (version_id, passage_id, raw.get("statement"), raw.get("quote"), score, reason, kind, raw.get("obligation"), lot_no))
 
 
-def _store_conditions(conn: psycopg.Connection, req_id: int, req: Requirement, primary: dict | None, primary_note: str | None,
+def _store_conditions(conn: Conn, req_id: int, req: Requirement, primary: dict | None, primary_note: str | None,
                       passage_text: str) -> list[dict]:
     """Persist the atomic conditions. Each is validated against its own quote; a bad one is kept without its machine check."""
     items = req.conditions or []
     if not items:
-        rows = [(req.statement, primary, req.quote, True, req.evidence_needed, primary_note)]
+        rows: list[tuple[str, dict | None, str | None, bool, list[str], str | None]] = [
+            (req.statement, primary, req.quote, True, req.evidence_needed, primary_note)]
     else:
         rows = []
         for item in items:
-            quote = item.quote or req.quote
-            if quote_score(quote, passage_text) < QUOTE_THRESHOLD or not same_digits(quote, passage_text):
+            said = item.quote or req.quote
+            if quote_score(said, passage_text) < QUOTE_THRESHOLD or not same_digits(said, passage_text):
                 rows.append((item.label, None, None, item.mandatory, item.evidence_needed, "its quote was not found in the source"))
                 continue
-            checked = check_condition(item.condition, quote)
-            rows.append((item.label, checked.condition, quote, item.mandatory, item.evidence_needed, checked.note))
+            checked = check_condition(item.condition, said)
+            rows.append((item.label, checked.condition, said, item.mandatory, item.evidence_needed, checked.note))
     for i, (label, cond, quote, mandatory, evidence, note) in enumerate(rows):
         conn.execute(
             """INSERT INTO requirement_condition (requirement_id, ordinal, label, condition, quote, mandatory, evidence_needed, condition_note)
@@ -124,7 +128,7 @@ def _store_conditions(conn: psycopg.Connection, req_id: int, req: Requirement, p
     return [r[1] for r in rows if r[1]]
 
 
-def _passages(conn: psycopg.Connection, version_id: int, profile_id: int | None = None) -> list[dict]:
+def _passages(conn: Conn, version_id: int, profile_id: int | None = None) -> list[dict]:
     return conn.execute(
         """SELECT p.id, p.document_id, p.ordinal, p.page, p.section, p.text, coalesce(d.filename, 'document') AS document,
                   d.owner_profile_id AS owner
@@ -133,7 +137,7 @@ def _passages(conn: psycopg.Connection, version_id: int, profile_id: int | None 
            ORDER BY d.id, p.ordinal""", (version_id, profile_id)).fetchall()
 
 
-def extract_version(conn: psycopg.Connection, version_id: int, llm: LLM, force: bool = False,
+def extract_version(conn: Conn, version_id: int, llm: LLM, force: bool = False,
                     only: set[int] | None = None, commit: bool = True, profile_id: int | None = None) -> dict:
     """Extracts what is new in the public pack, and in this supplier's own uploads when a profile is given."""
     passages = _passages(conn, version_id, profile_id)
@@ -156,7 +160,7 @@ def extract_version(conn: psycopg.Connection, version_id: int, llm: LLM, force: 
     for p in passages:
         if p["section"]:
             sections.setdefault(p["document_id"], {}).setdefault(p["section"].lower(), []).append(p["id"])
-    definitions = {}
+    definitions: dict[str, int] = {}
     for p in passages:
         if p["section"] and "defin" in p["section"].lower():
             for term in set(t for t in re.findall(r"\b([A-Z][a-z]+(?: [A-Z][a-z]+)*)\b", p["text"])):
@@ -165,7 +169,7 @@ def extract_version(conn: psycopg.Connection, version_id: int, llm: LLM, force: 
         "SELECT id, label FROM document_ref WHERE version_id = %s AND (owner_profile_id IS NULL OR owner_profile_id = %s)",
         (version_id, profile_id))}
 
-    stats = {"accepted": 0, "rejected": 0, "duplicates": 0, "calls": 0, "cost_usd": 0.0, "conditions_dropped": 0}
+    stats: dict[str, Any] = {"accepted": 0, "rejected": 0, "duplicates": 0, "calls": 0, "cost_usd": 0.0, "conditions_dropped": 0}
     seen: set[tuple] = set()
     stats["ids"] = []
     lot_nos = sorted(lots)
@@ -230,7 +234,7 @@ def extract_version(conn: psycopg.Connection, version_id: int, llm: LLM, force: 
         if checked.note:
             _reject(conn, version_id, raw, "condition", f"requirement kept without its machine check: {checked.note}", score, pid, lot_no)
             stats["conditions_dropped"] += 1
-        req_id = conn.execute(
+        req_id = must(conn.execute(
             """INSERT INTO requirement (lot_id, lot_no, version_id, statement, category, obligation, condition,
                                         equivalent_allowed, evidence_needed, quote, passage_id, section, page, refs,
                                         defined_terms, quote_score, scope, condition_note, extract_version, owner_profile_id)
@@ -238,7 +242,7 @@ def extract_version(conn: psycopg.Connection, version_id: int, llm: LLM, force: 
             (lots.get(lot_no) if lot_no else None, lot_no, version_id, req.statement, req.category, req.obligation,
              Jsonb(checked.condition) if checked.condition else None, req.equivalent_allowed, req.evidence_needed, req.quote, pid,
              p["section"], p["page"], req.references, req.defined_terms, score, req.scope, checked.note, EXTRACT_VERSION, p["owner"]),
-        ).fetchone()["id"]
+        ).fetchone())["id"]
         conds = _store_conditions(conn, req_id, req, checked.condition, checked.note, _source_text(p, by_id))
         _record_dependencies(conn, req_id, version_id, req, p, sections, refs_by_label, definitions, conds)
         stats["accepted"] += 1

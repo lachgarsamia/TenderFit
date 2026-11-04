@@ -36,7 +36,7 @@ class RefState:
 
 def coverage(refs: list[RefState]) -> str:
     docs = [r for r in refs if r.kind != "notice"]
-    if not any(r.status == "read" for r in docs):
+    if not any(r.status in ("read", "partial") for r in docs):
         return "notice_only"
     if any(r.essential and r.status not in ("read", "confirmed_none") for r in docs):
         return "partial"

@@ -1,8 +1,7 @@
 from dataclasses import dataclass, field
 
-import psycopg
-
 from tenderfit.changes.diff import Change
+from tenderfit.db import Conn
 
 
 @dataclass
@@ -43,7 +42,7 @@ def plan_reassessment(change: Change, deps: list[Dep], facts: set[int] | None = 
                 reextract=change.new_passage_ids, hits=hits)
 
 
-def load_deps(conn: psycopg.Connection, assessment_id: int, static_only: bool = False) -> list[Dep]:
+def load_deps(conn: Conn, assessment_id: int, static_only: bool = False) -> list[Dep]:
     """What one assessment's verdicts depend on: what extraction recorded for its requirements, plus what those verdicts
     actually read. Another supplier's verdicts, and earlier or shadow runs, have no say in this supplier's plan.
     static_only leaves out what the verdicts read, for comparing the two approaches in evaluation."""

@@ -1,11 +1,10 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from tenderfit.config import settings
-from tenderfit.db import Conn
+from tenderfit.db import Conn, must
 from tenderfit.ingest import status as st
 from tenderfit.ingest.client import FtsClient
 from tenderfit.ingest.normalise import Linked, Version, content_hash, finite, normalise, parse_ts
@@ -13,7 +12,7 @@ from tenderfit.ingest.normalise import Linked, Version, content_hash, finite, no
 SOURCE = "find_a_tender"
 
 
-def store_raw(conn: psycopg.Connection, release: dict, source_url: str) -> tuple[int, bool]:
+def store_raw(conn: Conn, release: dict, source_url: str) -> tuple[int, bool]:
     row = conn.execute(
         """INSERT INTO raw_release (ocid, release_id, release_date, tags, payload, sha256, source_url)
            VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (ocid, release_id) DO NOTHING RETURNING id""",
@@ -22,12 +21,12 @@ def store_raw(conn: psycopg.Connection, release: dict, source_url: str) -> tuple
     ).fetchone()
     if row:
         return row["id"], True
-    existing = conn.execute("SELECT id FROM raw_release WHERE ocid = %s AND release_id = %s",
-                            (release["ocid"], release["id"])).fetchone()
+    existing = must(conn.execute("SELECT id FROM raw_release WHERE ocid = %s AND release_id = %s",
+                            (release["ocid"], release["id"])).fetchone())
     return existing["id"], False
 
 
-def apply_release(conn: psycopg.Connection, raw_id: int, release: dict, retrieved_at: datetime) -> str | None:
+def apply_release(conn: Conn, raw_id: int, release: dict, retrieved_at: datetime) -> str | None:
     n = normalise(release)
     if n is None:
         return None
@@ -43,14 +42,14 @@ def apply_release(conn: psycopg.Connection, raw_id: int, release: dict, retrieve
     return n.ocid
 
 
-def _apply_version(conn: psycopg.Connection, raw_id: int, v: Version, digest: str, retrieved_at: datetime) -> None:
+def _apply_version(conn: Conn, raw_id: int, v: Version, digest: str, retrieved_at: datetime) -> None:
     if v.buyer and v.buyer.get("id"):
         conn.execute("INSERT INTO buyer (id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
                      (v.buyer["id"], v.buyer.get("name") or v.buyer["id"]))
-    opp = conn.execute(
+    opp = must(conn.execute(
         "INSERT INTO opportunity (ocid) VALUES (%s) ON CONFLICT (ocid) DO UPDATE SET ocid = EXCLUDED.ocid RETURNING id",
         (v.ocid,),
-    ).fetchone()["id"]
+    ).fetchone())["id"]
     conn.execute(
         """INSERT INTO notice_version (opportunity_id, ocid, release_id, raw_release_id, notice_type, release_tag,
                                        published_at, source_url, retrieved_at, content_hash, fields)
@@ -65,10 +64,10 @@ def _apply_version(conn: psycopg.Connection, raw_id: int, v: Version, digest: st
            WHERE id = %s""",
         ((v.buyer or {}).get("id"),),
     )
-    latest = conn.execute(
+    latest = must(conn.execute(
         "SELECT id, fields FROM notice_version WHERE ocid = %s ORDER BY published_at DESC, release_id DESC LIMIT 1",
         (v.ocid,),
-    ).fetchone()
+    ).fetchone())
     f = latest["fields"]
     conn.execute(
         """UPDATE opportunity SET buyer_id = %s, title = %s, legal_basis = %s, deadline = %s, cpv_codes = %s,
@@ -83,7 +82,7 @@ def _apply_version(conn: psycopg.Connection, raw_id: int, v: Version, digest: st
                      (lot["title"], lot["quantity"], opp, lot["id"]))
 
 
-def refresh_statuses(conn: psycopg.Connection, now: datetime, ocids: set[str] | None = None) -> int:
+def refresh_statuses(conn: Conn, now: datetime, ocids: set[str] | None = None) -> int:
     conn.execute("SELECT pg_advisory_xact_lock(7001)")
     wm = conn.execute("SELECT watermark FROM import_state WHERE source = %s", (SOURCE,)).fetchone()
     last_checked = wm["watermark"] if wm else None
@@ -114,12 +113,12 @@ def _windows(start: datetime, end: datetime, hours: int):
         start = stop
 
 
-def run_import(conn: psycopg.Connection, client: FtsClient, since: datetime, until: datetime,
+def run_import(conn: Conn, client: FtsClient, since: datetime, until: datetime,
                advance_watermark: bool = True, now: datetime | None = None) -> dict:
-    run_id = conn.execute(
+    run_id = must(conn.execute(
         "INSERT INTO import_run (source, window_from, window_to) VALUES (%s, %s, %s) RETURNING id",
         (SOURCE, since, until),
-    ).fetchone()["id"]
+    ).fetchone())["id"]
     conn.commit()
     stats = {"pages": 0, "seen": 0, "new": 0}
     touched: set[str] = set()
@@ -158,7 +157,7 @@ def run_import(conn: psycopg.Connection, client: FtsClient, since: datetime, unt
     return stats
 
 
-def incremental(conn: psycopg.Connection, client: FtsClient, now: datetime | None = None,
+def incremental(conn: Conn, client: FtsClient, now: datetime | None = None,
                 backfill_days: int = 14) -> dict:
     now = now or datetime.now(timezone.utc)
     wm = conn.execute("SELECT watermark FROM import_state WHERE source = %s", (SOURCE,)).fetchone()
@@ -193,7 +192,7 @@ DESTROYED_BY_REBUILD = ("opportunity", "notice_version", "lot", "linked_notice",
 
 def rebuild_scope(conn: Conn) -> dict[str, int]:
     """How many rows a destructive rebuild would delete, per table."""
-    return {t: conn.execute(f"SELECT count(*) AS n FROM {t}").fetchone()["n"] for t in DESTROYED_BY_REBUILD}  # type: ignore[index]
+    return {t: must(conn.execute(f"SELECT count(*) AS n FROM {t}").fetchone())["n"] for t in DESTROYED_BY_REBUILD}
 
 
 def destructive_rebuild(conn: Conn, confirm_database: str | None, now: datetime | None = None) -> dict:

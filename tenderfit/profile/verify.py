@@ -60,9 +60,9 @@ def verify_fact_evidence(fact: dict, profile_name: str, pages: list[str], quote_
         checks["product"] = {"result": "ok" if hit else "not_found", "detail": f"{product} {'named' if hit else 'not named'} in the file"}
     expiry = parse_expiry(text)
     if expiry:
-        conflict = stated_expiry is not None and stated_expiry != expiry
+        conflict = bool(stated_expiry and stated_expiry != expiry)
         checks["expiry"] = {"result": "mismatch" if conflict else "ok", "date": expiry.isoformat(),
-                            "detail": f"The file says {expiry.isoformat()}" + (f", not {stated_expiry.isoformat()} as entered" if conflict else "")}
+                            "detail": f"The file says {expiry.isoformat()}" + (f", not {stated_expiry} as entered" if conflict else "")}
     else:
         checks["expiry"] = {"result": "not_found", "detail": "No expiry date recognised in the file"}
     checks["quote"] = {"result": "ok" if quote_ok else "not_found",

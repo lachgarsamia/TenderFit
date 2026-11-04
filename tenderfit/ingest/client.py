@@ -64,9 +64,10 @@ class FtsClient:
     def release_pages(self, updated_from: datetime, updated_to: datetime,
                       stages: str | None = None) -> Iterator[tuple[str, dict]]:
         url = f"{self.base_url}/ocdsReleasePackages"
-        params = {"limit": 100, "updatedFrom": _fmt(updated_from), "updatedTo": _fmt(updated_to)}
+        first: dict[str, object] = {"limit": 100, "updatedFrom": _fmt(updated_from), "updatedTo": _fmt(updated_to)}
         if stages:
-            params["stages"] = stages
+            first["stages"] = stages
+        params: dict[str, object] | None = first
         while url:
             package = self.get_json(url, params)
             yield url if params is None else str(httpx.URL(url, params=params)), package

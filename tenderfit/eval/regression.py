@@ -9,7 +9,7 @@ import os
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import psycopg
 
@@ -25,7 +25,7 @@ from tenderfit.eval import metrics as m
 from tenderfit.eval.run import _db_url
 
 DB = "tenderfit_regression"
-KW = dict(agent=False, emb=demo.HashEmbedder(), rr=demo.OverlapReranker())
+KW: dict[str, Any] = dict(agent=False, emb=demo.HashEmbedder(), rr=demo.OverlapReranker())
 
 
 @dataclass

@@ -1,9 +1,9 @@
 """Points where a person must confirm (Table 13). Every confirmation is stored with who, when and what it changed."""
 from datetime import date
 
-import psycopg
 from psycopg.types.json import Jsonb
 
+from tenderfit.db import Conn, must
 from tenderfit.profile import service as profiles
 
 POINTS = {
@@ -25,7 +25,7 @@ class ConfirmationNotFound(ConfirmationError):
     """Unknown, or another supplier's: the caller is not told which."""
 
 
-def _verdict(conn: psycopg.Connection, verdict_id: int) -> dict:
+def _verdict(conn: Conn, verdict_id: int) -> dict:
     v = conn.execute(
         """SELECT v.*, a.lot_id, a.profile_id FROM verdict v JOIN assessment a ON a.id = v.assessment_id WHERE v.id = %s""",
         (verdict_id,)).fetchone()
@@ -34,7 +34,7 @@ def _verdict(conn: psycopg.Connection, verdict_id: int) -> dict:
     return v
 
 
-def confirm(conn: psycopg.Connection, point: str, user: str, target_id: int, decision: str, reason: str | None = None,
+def confirm(conn: Conn, point: str, user: str, target_id: int, decision: str, reason: str | None = None,
             profile_id: int | None = None, payload: dict | None = None) -> dict:
     spec = POINTS.get(point)
     if not spec or decision not in spec["decisions"]:
@@ -57,7 +57,7 @@ def confirm(conn: psycopg.Connection, point: str, user: str, target_id: int, dec
         v = _verdict(conn, target_id)
         profile_id = v["profile_id"]
         kind = "declaration" if point == "G2" else "workload"
-        version = conn.execute("SELECT version_id FROM assessment WHERE id = %s", (v["assessment_id"],)).fetchone()["version_id"]
+        version = must(conn.execute("SELECT version_id FROM assessment WHERE id = %s", (v["assessment_id"],)).fetchone())["version_id"]
         facts = [r["fact_id"] for r in conn.execute("SELECT fact_id FROM verdict_fact WHERE verdict_id = %s", (target_id,))]
         if not facts:
             raise ConfirmationError("this verdict uses no profile fact to confirm")
@@ -121,15 +121,15 @@ def confirm(conn: psycopg.Connection, point: str, user: str, target_id: int, dec
                AND NOT a.shadow AND (%s::bigint IS NULL OR a.profile_id = %s)""",
             (ref["version_id"], profile_id, profile_id))]
 
-    cid = conn.execute(
+    cid = must(conn.execute(
         """INSERT INTO confirmation (point, user_name, target_type, target_id, decision, reason, profile_id, payload)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-        (point, user, spec["target"], target_id, decision, reason, profile_id, Jsonb(payload))).fetchone()["id"]
+        (point, user, spec["target"], target_id, decision, reason, profile_id, Jsonb(payload))).fetchone())["id"]
     conn.commit()
     return {"confirmation_id": cid, "reassess": sorted(set(reassess))}
 
 
-def overrides(conn: psycopg.Connection, profile_id: int) -> dict[int, dict]:
+def overrides(conn: Conn, profile_id: int) -> dict[int, dict]:
     return {r["requirement_id"]: r for r in conn.execute(
         """SELECT DISTINCT ON ((payload->>'requirement_id')::bigint) (payload->>'requirement_id')::bigint AS requirement_id,
                   reason, user_name FROM confirmation

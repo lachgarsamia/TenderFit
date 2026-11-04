@@ -22,7 +22,7 @@ from tenderfit.assessment.config import BASELINES, PipelineConfig
 from tenderfit.assessment.pipeline import assess_lot
 from tenderfit.changes.apply import process_pending
 from tenderfit.config import settings
-from tenderfit.db import connect, migrate
+from tenderfit.db import connect, migrate, must
 from tenderfit.documents import service as docs
 from tenderfit.documents.text import normalise, quote_ok
 from tenderfit.eval import metrics as m
@@ -176,23 +176,23 @@ def run_config(dataset: Path, cfg: PipelineConfig, llm: LLM, today: date, **asse
             http = _portal(dataset, {**notice.get("documents", {}),
                                      **{k: v for a in notice.get("amendments", []) for k, v in a.get("documents", {}).items()}})
             _import(conn, releases[0])
-            opp = conn.execute("SELECT id, current_version_id FROM opportunity WHERE ocid = %s",
-                               (releases[0]["ocid"],)).fetchone()
+            opp = must(conn.execute("SELECT id, current_version_id FROM opportunity WHERE ocid = %s",
+                               (releases[0]["ocid"],)).fetchone())
             _prepare_documents(conn, opp["current_version_id"], dataset, notice)
             inv = docs.inventory(conn, opp["current_version_id"])["documents"]
             essential_unread = any(r["status"] not in ("read", "confirmed_none") for r in inv
                                    if r["label"] in notice.get("essential_documents", []))
             for lot_no, lot_gold in notice["lots"].items():
-                lot_id = conn.execute("SELECT id FROM lot WHERE opportunity_id = %s AND lot_no = %s",
-                                      (opp["id"], lot_no)).fetchone()["id"]
+                lot_id = must(conn.execute("SELECT id FROM lot WHERE opportunity_id = %s AND lot_no = %s",
+                                      (opp["id"], lot_no)).fetchone())["id"]
                 for pname in lot_gold["profiles"]:
                     t0 = time.monotonic()
                     aid = assess_lot(conn, lot_id, profiles[pname], llm, today=today, config=cfg, http=http, **assess_kw)
                     secs = time.monotonic() - t0
                     mapping = match(notice["requirements"], conn, opp["current_version_id"], lot_no)
                     chk = _assessment_checks(conn, aid, today, essential_unread)
-                    extracted = conn.execute("""SELECT count(*) n FROM requirement WHERE version_id = %s AND (lot_no IS NULL OR lot_no = %s)""",
-                                             (opp["current_version_id"], lot_no)).fetchone()["n"]
+                    extracted = must(conn.execute("""SELECT count(*) n FROM requirement WHERE version_id = %s AND (lot_no IS NULL OR lot_no = %s)""",
+                                             (opp["current_version_id"], lot_no)).fetchone())["n"]
                     results.append(LotResult(notice["id"], lot_no, pname, _items(conn, aid, notice["requirements"], mapping, pname),
                                              chk["provisional"], chk["eligibility"], chk["final_with_unread"], chk["cost"], secs,
                                              chk["citations"], chk["citations_ok"], chk["stale"], extracted, len(mapping), chk["evidence"]))
@@ -200,7 +200,7 @@ def run_config(dataset: Path, cfg: PipelineConfig, llm: LLM, today: date, **asse
                 if not cfg.name.startswith("B5"):
                     break
                 _import(conn, json.loads((dataset / amend["release"]).read_text()))
-                new_vid = conn.execute("SELECT current_version_id v FROM opportunity WHERE id = %s", (opp["id"],)).fetchone()["v"]
+                new_vid = must(conn.execute("SELECT current_version_id v FROM opportunity WHERE id = %s", (opp["id"],)).fetchone())["v"]
                 _prepare_documents(conn, new_vid, dataset, {**notice, "documents": {**notice.get("documents", {}),
                                                                                      **amend.get("documents", {})}})
                 for label in amend.get("confirm_none", []):
@@ -210,11 +210,11 @@ def run_config(dataset: Path, cfg: PipelineConfig, llm: LLM, today: date, **asse
                 if cfg.targeted:
                     process_pending(conn, llm, http=http, today=today, config=cfg, **assess_kw)
                 for r in [r for r in results if r.notice == notice["id"]]:
-                    lot_id = conn.execute("SELECT id FROM lot WHERE opportunity_id = %s AND lot_no = %s",
-                                          (opp["id"], r.lot)).fetchone()["id"]
+                    lot_id = must(conn.execute("SELECT id FROM lot WHERE opportunity_id = %s AND lot_no = %s",
+                                          (opp["id"], r.lot)).fetchone())["id"]
                     if cfg.targeted:
-                        aid = conn.execute("""SELECT id FROM assessment WHERE lot_id = %s AND profile_id = %s AND NOT superseded
-                                              AND NOT shadow ORDER BY id DESC LIMIT 1""", (lot_id, profiles[r.profile])).fetchone()["id"]
+                        aid = must(conn.execute("""SELECT id FROM assessment WHERE lot_id = %s AND profile_id = %s AND NOT superseded
+                                              AND NOT shadow ORDER BY id DESC LIMIT 1""", (lot_id, profiles[r.profile])).fetchone())["id"]
                         imp = conn.execute("SELECT affected FROM change_impact WHERE after_assessment_id = %s", (aid,)).fetchone()
                         affected_new = {a["requirement_id"] for a in (imp["affected"] if imp else [])}
                     else:
@@ -227,8 +227,8 @@ def run_config(dataset: Path, cfg: PipelineConfig, llm: LLM, today: date, **asse
                     r.after = _items(conn, aid, notice["requirements"], mapping, r.profile, "verdicts_after")
                     r.affected_pred = {back[x] for x in affected_new if x in back}
                     r.affected_gold = set(amend["affected"])
-        usage = conn.execute("""SELECT coalesce(sum(cost_usd), 0) cost, coalesce(sum(input_tokens + output_tokens + cache_read_tokens), 0) tokens,
-                                       count(*) calls FROM llm_call""").fetchone()
+        usage = must(conn.execute("""SELECT coalesce(sum(cost_usd), 0) cost, coalesce(sum(input_tokens + output_tokens + cache_read_tokens), 0) tokens,
+                                       count(*) calls FROM llm_call""").fetchone())
     for r in results:
         r.evidence["__run_total_cost_usd"] = float(usage["cost"])
         r.evidence["__run_tokens"] = int(usage["tokens"])

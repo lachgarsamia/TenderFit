@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -199,7 +199,7 @@ def _needs_model(reason: str, params: list[str], facts: list[Fact] | None = None
 def _settle(ok: bool, fact: Fact, ctx: Context, params: list[str], what: str, proof_needed: bool,
             workload: bool = False, required: str | None = None) -> RuleResult:
     v = check(fact.view(), today=ctx.today, deadline=ctx.deadline)
-    base = {"facts": [fact.id], "params": params, "required": required, "observed": fact.label}
+    base: dict[str, Any] = {"facts": [fact.id], "params": params, "required": required, "observed": fact.label}
     if not ok:
         if v.usable and not v.stale:
             return RuleResult(NOT_MET, f"{what}: contrary evidence ({fact.label})", needs_human="G6", **base)
@@ -283,7 +283,7 @@ def _within_years(cond: Condition, sel: Selection, ctx: Context, params: list[st
         end, units = _date(f.value.get("end")), _number(f.value.get("units"))
         if end is None or (min_units is not None and units is None):
             incomplete.append(f)
-        elif start <= end <= anchor and (min_units is None or units >= min_units):
+        elif start <= end <= anchor and (min_units is None or (units is not None and units >= min_units)):
             qualifying.append(f)
         else:
             outside.append(f)

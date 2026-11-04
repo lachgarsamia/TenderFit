@@ -19,7 +19,7 @@ from tenderfit.assessment.pipeline import assess_lot
 from tenderfit.auth import create_user, grant
 from tenderfit.changes.apply import AMENDMENT_LOCK, ChangeProcessingError, _process_pending, shadow_full
 from tenderfit.config import settings
-from tenderfit.db import connect, migrate
+from tenderfit.db import connect, migrate, must
 from tenderfit.demo import scenario
 from tenderfit.demo.llm import DemoLLM
 from tenderfit.documents import service as docs
@@ -173,7 +173,7 @@ def amend(conn, a) -> None:
         conn.commit()
     print(f"amendment applied: {len(impacts)} impact(s)")
     for iid in impacts:
-        print(conn.execute("SELECT explanation FROM change_impact WHERE id = %s", (iid,)).fetchone()["explanation"])
+        print(must(conn.execute("SELECT explanation FROM change_impact WHERE id = %s", (iid,)).fetchone())["explanation"])
         if a.audit:
             print("full re-check:", shadow_full(conn, iid, DemoLLM(), http=portal(45), agent=False, **_models(a)))
 

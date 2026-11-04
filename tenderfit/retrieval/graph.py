@@ -4,8 +4,7 @@ Edges come only from references and definitions found in the text. There is no e
 always be explained by the words that created it."""
 import re
 
-import psycopg
-
+from tenderfit.db import Conn
 from tenderfit.documents import references
 
 DEFINES = re.compile(r"(?:^|[\n|.]\s*)[\"“']?([A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+)*)[\"”']?\s*(?:\||:|\bmeans?\b|\bshall mean\b|\bis defined as\b)")
@@ -18,7 +17,7 @@ def _section_matches(section: str, label: str) -> bool:
     return s == low or s == key or s.startswith((f"{low} ", f"{low}:", f"{low}.", f"{low}-", f"{key} ", f"{key}.", f"{key}:"))
 
 
-def build_graph(conn: psycopg.Connection, version_id: int) -> int:
+def build_graph(conn: Conn, version_id: int) -> int:
     """Idempotent. Rebuilt whenever passages may have changed; access is enforced when edges are read."""
     rows = conn.execute(
         """SELECT p.id, p.document_id, p.section, p.text FROM passage p JOIN document d ON d.id = p.document_id
@@ -36,12 +35,12 @@ def build_graph(conn: psycopg.Connection, version_id: int) -> int:
             own = [t for t in rows if t["section"] and t["id"] != p["id"] and t["document_id"] == p["document_id"]
                    and _section_matches(t["section"], ref.label)]
             targets = own or [t for t in rows if t["section"] and t["id"] != p["id"] and _section_matches(t["section"], ref.label)]
-            for t in targets:
-                n += _edge(conn, version_id, p["id"], t["id"], "REFERENCES", ref.label)
+            for target in targets:
+                n += _edge(conn, version_id, p["id"], target["id"], "REFERENCES", ref.label)
         for term in {t.lower(): t for t in TERM.findall(p["text"])}.values():
-            for t in definitions.get(term.lower(), []):
-                if t != p["id"]:
-                    n += _edge(conn, version_id, p["id"], t, "DEFINED_BY", term)
+            for defining in definitions.get(term.lower(), []):
+                if defining != p["id"]:
+                    n += _edge(conn, version_id, p["id"], defining, "DEFINED_BY", term)
     conn.commit()
     return n
 
@@ -51,7 +50,7 @@ def _edge(conn, version_id: int, a: int, b: int, kind: str, label: str) -> int:
                            VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""", (version_id, a, b, kind, label)).rowcount
 
 
-def expand(conn: psycopg.Connection, from_passage: int, labels: set[str], profile_id: int | None, limit: int = 6) -> list[dict]:
+def expand(conn: Conn, from_passage: int, labels: set[str], profile_id: int | None, limit: int = 6) -> list[dict]:
     """One hop from the requirement's own passage, only along links the requirement itself names."""
     if not labels:
         return []
@@ -64,7 +63,7 @@ def expand(conn: psycopg.Connection, from_passage: int, labels: set[str], profil
         (from_passage, [x.lower() for x in labels], profile_id, limit)).fetchall()
 
 
-def reference_gaps(conn: psycopg.Connection, version_id: int, passage_id: int, labels: set[str], profile_id: int | None) -> list[str]:
+def reference_gaps(conn: Conn, version_id: int, passage_id: int, labels: set[str], profile_id: int | None) -> list[str]:
     """References with no passage to follow and no document on record: something this verdict did not get to read."""
     gaps = []
     for label in sorted(labels):

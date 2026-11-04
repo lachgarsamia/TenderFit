@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-import psycopg
 from psycopg.types.json import Jsonb
 from pydantic import ValidationError
 
@@ -14,6 +13,7 @@ from tenderfit.assessment.confirm import overrides
 from tenderfit.assessment.contradiction import find_conflicts
 from tenderfit.assessment.prompts import VERDICT_SCHEMA, VERDICT_SYSTEM, VERDICT_VERSION, verdict_user
 from tenderfit.config import settings
+from tenderfit.db import Conn, must
 from tenderfit.documents import references
 from tenderfit.documents import service as docs
 from tenderfit.documents.text import normalise, quote_ok
@@ -58,7 +58,7 @@ class Decision:
     conflict: bool = False
 
 
-def load_facts(conn: psycopg.Connection, profile_id: int, lot_id: int, version_id: int | None = None) -> list[Fact]:
+def load_facts(conn: Conn, profile_id: int, lot_id: int, version_id: int | None = None) -> list[Fact]:
     """A confirmation for this lot holds for the notice version it was given on and for the fact as it then stood."""
     conf = {(r["fact_id"], r["kind"]) for r in conn.execute(
         """SELECT c.fact_id, c.kind FROM lot_fact_confirmation c JOIN profile_fact f ON f.id = c.fact_id
@@ -70,13 +70,13 @@ def load_facts(conn: psycopg.Connection, profile_id: int, lot_id: int, version_i
             for r in conn.execute("SELECT * FROM profile_fact WHERE profile_id = %s ORDER BY id", (profile_id,))]
 
 
-def lot_context(conn: psycopg.Connection, lot_id: int, today: date) -> tuple[dict, Context]:
-    row = conn.execute(
+def lot_context(conn: Conn, lot_id: int, today: date) -> tuple[dict, Context]:
+    row = must(conn.execute(
         """SELECT l.*, o.ocid, o.regions AS opp_regions, o.cpv_codes AS opp_cpv, o.current_version_id, nv.fields
            FROM lot l JOIN opportunity o ON o.id = l.opportunity_id
-           JOIN notice_version nv ON nv.id = o.current_version_id WHERE l.id = %s""", (lot_id,)).fetchone()
+           JOIN notice_version nv ON nv.id = o.current_version_id WHERE l.id = %s""", (lot_id,)).fetchone())
     f = row["fields"]
-    lf = next((x for x in f["lots"] if x["id"] == row["lot_no"]), {})
+    lf: dict = next((x for x in f["lots"] if x["id"] == row["lot_no"]), {})
     deadline = datetime.fromisoformat(f["deadline"]).astimezone(LONDON).date() if f.get("deadline") else None
     period = lf.get("contract_period") or {}
     contract_end = period.get("endDate")
@@ -169,7 +169,7 @@ class ConditionResult:
     rule: RuleResult | None  # None: this condition must be interpreted
 
 
-def _rule_outcomes(conn: psycopg.Connection, req: dict, facts: list[Fact], ctx: Context, config: PipelineConfig) -> list[ConditionResult]:
+def _rule_outcomes(conn: Conn, req: dict, facts: list[Fact], ctx: Context, config: PipelineConfig) -> list[ConditionResult]:
     rows = conn.execute("SELECT * FROM requirement_condition WHERE requirement_id = %s ORDER BY ordinal", (req["id"],)).fetchall()
     if not rows:  # requirements extracted before conditions existed
         rows = [{"id": None, "label": req["statement"], "mandatory": True, "condition": req["condition"], "quote": req["quote"]}]
@@ -200,54 +200,60 @@ def parent_status(statuses: list[str]) -> str:
     return NEEDS if NEEDS in statuses or MET in statuses else UNKNOWN
 
 
+def _settled(results: list[ConditionResult], mandatory_only: bool = False) -> list[tuple[ConditionResult, RuleResult]]:
+    return [(c, c.rule) for c in results if c.rule and (c.mandatory or not mandatory_only)]
+
+
 def _from_rules(req: dict, results: list[ConditionResult], escalate: list[str]) -> Decision:
-    settled = [c for c in results if c.rule]
-    binding = [c for c in settled if c.mandatory] or settled
-    status = parent_status([c.rule.status for c in binding])
+    settled = _settled(results)
+    binding = _settled(results, mandatory_only=True) or settled
+    status = parent_status([rule.status for _, rule in binding])
     if len(settled) == 1:
-        r = settled[0].rule
+        r = settled[0][1]
         reason = r.reason
     else:
-        reason = "; ".join(f"{c.label}: {c.rule.reason}" for c in settled)
-        r = next((c.rule for c in binding if c.rule.status == status), binding[0].rule)
-    bases = {c.rule.basis for c in binding}
+        reason = "; ".join(f"{c.label}: {rule.reason}" for c, rule in settled)
+        r = next((rule for _, rule in binding if rule.status == status), binding[0][1])
+    bases = {rule.basis for _, rule in binding}
     basis = "documents" if bases == {"documents"} else ("declared" if "declared" in bases or "documents" in bases else "rule")
     return Decision(status, reason, "rule", basis if status == MET else r.basis,
-                    list(dict.fromkeys(f for c in settled for f in c.rule.facts)), [(req["passage_id"], req["quote"])], [],
-                    list(dict.fromkeys(p for c in settled for p in c.rule.params)),
-                    next((c.rule.question for c in binding if c.rule.status == status and c.rule.question), None),
-                    next((c.rule.needs_human for c in binding if c.rule.status == status and c.rule.needs_human), None),
+                    list(dict.fromkeys(f for _, rule in settled for f in rule.facts)), [(req["passage_id"], req["quote"])], [],
+                    list(dict.fromkeys(p for _, rule in settled for p in rule.params)),
+                    next((rule.question for _, rule in binding if rule.status == status and rule.question), None),
+                    next((rule.needs_human for _, rule in binding if rule.status == status and rule.needs_human), None),
                     list(escalate), required=r.required, observed=r.observed)
 
 
-def _lineage(conn: psycopg.Connection, req: dict) -> list[int]:
+def _lineage(conn: Conn, req: dict) -> list[int]:
     """This requirement and its predecessors while the source wording stayed the same: decisions made on them still apply."""
-    ids, cur, wording = [req["id"]], req, normalise(req["quote"])
-    while cur.get("carried_from"):
-        cur = conn.execute("SELECT id, quote, carried_from FROM requirement WHERE id = %s", (cur["carried_from"],)).fetchone()
-        if not cur or normalise(cur["quote"]) != wording:
+    ids, wording = [req["id"]], normalise(req["quote"])
+    parent = req.get("carried_from")
+    while parent:
+        row = conn.execute("SELECT id, quote, carried_from FROM requirement WHERE id = %s", (parent,)).fetchone()
+        if not row or normalise(row["quote"]) != wording:
             break
-        ids.append(cur["id"])
+        ids.append(row["id"])
+        parent = row["carried_from"]
     return ids
 
 
 def _combine(d: Decision, results: list[ConditionResult]) -> Decision:
     """Rules bind the model: its reading of the open conditions can never lift a condition a rule did not accept."""
-    settled = [c for c in results if c.rule and c.mandatory]
+    settled = _settled(results, mandatory_only=True)
     if not settled:
         return d
-    status = parent_status([d.status] + [c.rule.status for c in settled])
-    d.facts = list(dict.fromkeys(d.facts + [f for c in results if c.rule for f in c.rule.facts]))
+    status = parent_status([d.status] + [rule.status for _, rule in settled])
+    d.facts = list(dict.fromkeys(d.facts + [f for _, rule in _settled(results) for f in rule.facts]))
     if status != d.status:
-        worst = next((c for c in settled if c.rule.status in (status, NOT_MET)), settled[0])
-        d.reason = f"{d.reason}; {worst.label}: {worst.rule.reason}"
-        d.status, d.needs_human, d.question = status, worst.rule.needs_human or d.needs_human, worst.rule.question or d.question
-        d.basis = worst.rule.basis if status != MET else d.basis
-        d.required, d.observed = worst.rule.required, worst.rule.observed
+        worst, why = next((pair for pair in settled if pair[1].status in (status, NOT_MET)), settled[0])
+        d.reason = f"{d.reason}; {worst.label}: {why.reason}"
+        d.status, d.needs_human, d.question = status, why.needs_human or d.needs_human, why.question or d.question
+        d.basis = why.basis if status != MET else d.basis
+        d.required, d.observed = why.required, why.observed
     return d
 
 
-def _model_decision(conn: psycopg.Connection, version_id: int, req: dict, facts: list[Fact], ctx: Context, llm: LLM, budget_left: float,
+def _model_decision(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Context, llm: LLM, budget_left: float,
                     emb, rr, config: PipelineConfig, profile_id: int | None, escalate: list[str], labels: set[str],
                     open_conditions: list[str]) -> Decision:
     rel = relevant_facts(facts, req["category"]) if config.rules else facts
@@ -278,9 +284,9 @@ def _model_decision(conn: psycopg.Connection, version_id: int, req: dict, facts:
     passages = {h.id: {"id": h.id, "text": h.text, "section": h.section, "page": h.page, "document": h.document} for h in hits}
     retrieval = [{"passage_id": h.id, "document": h.document, "section": h.section, "page": h.page, "why": h.why} for h in hits]
     if req["passage_id"] not in passages:
-        src = conn.execute(
+        src = must(conn.execute(
             """SELECT p.id, p.text, p.section, p.page, coalesce(d.filename, 'document') document FROM passage p
-               JOIN document d ON d.id = p.document_id WHERE p.id = %s""", (req["passage_id"],)).fetchone()
+               JOIN document d ON d.id = p.document_id WHERE p.id = %s""", (req["passage_id"],)).fetchone())
         passages[src["id"]] = dict(src)
     retrieval.append({"passage_id": req["passage_id"], "why": ["the requirement's own source"]})
     key = _cache_key(version_id, req, rel, ctx, sorted(passages) + answers + [config.name] + open_conditions, profile_id)
@@ -314,7 +320,7 @@ def _model_decision(conn: psycopg.Connection, version_id: int, req: dict, facts:
     return d
 
 
-def decide(conn: psycopg.Connection, version_id: int, req: dict, facts: list[Fact], ctx: Context, llm: LLM,
+def decide(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Context, llm: LLM,
            budget_left: float, emb: Embedder | None = None, rr: Reranker | None = None,
            config: PipelineConfig = PipelineConfig("B2"), profile_id: int | None = None) -> Decision:
     source = conn.execute("SELECT text FROM passage WHERE id = %s", (req["passage_id"],)).fetchone()
@@ -349,7 +355,7 @@ def decide(conn: psycopg.Connection, version_id: int, req: dict, facts: list[Fac
     return d
 
 
-def _apply_gaps(conn: psycopg.Connection, version_id: int, req: dict, d: Decision, labels: set[str], profile_id: int | None) -> None:
+def _apply_gaps(conn: Conn, version_id: int, req: dict, d: Decision, labels: set[str], profile_id: int | None) -> None:
     """A requirement that points somewhere we could not read cannot be called met on what we did read."""
     d.gaps = graph.reference_gaps(conn, version_id, req["passage_id"], {r.label for r in references.find(req["quote"]) if r.kind != "named"},
                                   profile_id)
@@ -361,7 +367,7 @@ def _apply_gaps(conn: psycopg.Connection, version_id: int, req: dict, d: Decisio
         d.reason = f"{d.reason.rstrip('. ')}; but it refers to {names}, which could not be read"
 
 
-def _apply_conflicts(conn: psycopg.Connection, version_id: int, req: dict, d: Decision, profile_id: int | None) -> None:
+def _apply_conflicts(conn: Conn, version_id: int, req: dict, d: Decision, profile_id: int | None) -> None:
     """Two documents stating the same obligation with different numbers: the supplier must ask the buyer which one holds."""
     conflicts = find_conflicts(conn, version_id, req["passage_id"], req["quote"], profile_id)
     if not conflicts:
@@ -397,7 +403,7 @@ def evidence_quality(d: Decision, facts: list[Fact]) -> tuple[str, str]:
     return "missing", "Nothing in your profile or in the documents read settles this."
 
 
-def _source_label(conn: psycopg.Connection, req: dict) -> str:
+def _source_label(conn: Conn, req: dict) -> str:
     r = conn.execute("""SELECT coalesce(d.filename, 'document') doc FROM passage p JOIN document d ON d.id = p.document_id
                         WHERE p.id = %s""", (req["passage_id"],)).fetchone()
     parts = [r["doc"] if r else "document"]
@@ -412,18 +418,18 @@ def _overridden(req: dict, overridden: dict, lineage: list[int]) -> dict | None:
     return next((overridden[i] for i in lineage if i in overridden), None)
 
 
-def _carry_verdict(conn: psycopg.Connection, aid: int, req: dict, old_vid: int, pmap: dict[int, int],
+def _carry_verdict(conn: Conn, aid: int, req: dict, old_vid: int, pmap: dict[int, int],
                    provisional: bool, profile_id: int, version_id: int) -> dict:
-    old = conn.execute("SELECT * FROM verdict WHERE id = %s", (old_vid,)).fetchone()
+    old = must(conn.execute("SELECT * FROM verdict WHERE id = %s", (old_vid,)).fetchone())
     retrieval = [{**r, "passage_id": pmap.get(r.get("passage_id"), r.get("passage_id"))} for r in old["retrieval"]]
-    vid = conn.execute(
+    vid = must(conn.execute(
         """INSERT INTO verdict (assessment_id, requirement_id, status, reason, basis, needs_human, provisional, question,
                                 escalate, escalate_reason, decided_by, carried_over, override_status, override_reason, override_by,
                                 required, observed, evidence_quality, uncertainty, retrieval, reference_gaps)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
         (aid, req["id"], old["status"], old["reason"], old["basis"], old["needs_human"], provisional, old["question"],
          old["escalate"], old["escalate_reason"], old["decided_by"], old["override_status"], old["override_reason"], old["override_by"],
-         old["required"], old["observed"], old["evidence_quality"], old["uncertainty"], Jsonb(retrieval), old["reference_gaps"])).fetchone()["id"]
+         old["required"], old["observed"], old["evidence_quality"], old["uncertainty"], Jsonb(retrieval), old["reference_gaps"])).fetchone())["id"]
     for c in conn.execute("SELECT passage_id, quote FROM verdict_citation WHERE verdict_id = %s", (old_vid,)).fetchall():
         conn.execute("INSERT INTO verdict_citation (verdict_id, passage_id, quote) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                      (vid, pmap.get(c["passage_id"], c["passage_id"]), c["quote"]))
@@ -448,7 +454,7 @@ def _carry_verdict(conn: psycopg.Connection, aid: int, req: dict, old_vid: int, 
                         VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                      (req["id"], version_id, dep["kind"], dep["target_type"], target, dep["recorded_by"], vid))
     if old["question"]:
-        prior = conn.execute("SELECT answer, answered_by, answered_at FROM question WHERE verdict_id = %s ORDER BY id LIMIT 1", (old_vid,)).fetchone()
+        prior = must(conn.execute("SELECT answer, answered_by, answered_at FROM question WHERE verdict_id = %s ORDER BY id LIMIT 1", (old_vid,)).fetchone())
         conn.execute("""INSERT INTO question (verdict_id, requirement_id, text, profile_id, answer, answered_by, answered_at)
                         VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                      (vid, req["id"], old["question"], profile_id, prior and prior["answer"], prior and prior["answered_by"],
@@ -463,7 +469,7 @@ class AssessmentFailed(Exception):
     """Raised when a run could not finish on its current attempt; the last good assessment stays current."""
 
 
-def _begin(conn: psycopg.Connection, lot_id: int, profile_id: int, version_id: int, mode: str, reason: str | None,
+def _begin(conn: Conn, lot_id: int, profile_id: int, version_id: int, mode: str, reason: str | None,
            shadow: bool, job_id: int | None) -> int:
     """Open a running assessment without touching the current completed one. An older unfinished run is closed."""
     if not shadow:
@@ -471,22 +477,22 @@ def _begin(conn: psycopg.Connection, lot_id: int, profile_id: int, version_id: i
             """UPDATE assessment SET status = 'failed', superseded = true, finished_at = now(), error_stage = 'interrupted',
                       error = 'interrupted: a new attempt started before this run finished'
                WHERE lot_id = %s AND profile_id = %s AND status = 'running' AND NOT shadow""", (lot_id, profile_id))
-    aid = conn.execute(
+    aid = must(conn.execute(
         """INSERT INTO assessment (profile_id, lot_id, version_id, provisional, mode, full_reason, status, shadow, superseded,
                                    job_id, progress)
            VALUES (%s, %s, %s, true, %s, %s, 'running', %s, %s, %s, %s) RETURNING id""",
-        (profile_id, lot_id, version_id, mode, reason, shadow, shadow, job_id, Jsonb({"stage": "documents"}))).fetchone()["id"]
+        (profile_id, lot_id, version_id, mode, reason, shadow, shadow, job_id, Jsonb({"stage": "documents"}))).fetchone())["id"]
     conn.commit()
     return aid
 
 
-def _progress(conn: psycopg.Connection, aid: int, state: dict, **values) -> None:
+def _progress(conn: Conn, aid: int, state: dict, **values) -> None:
     state.update(values)
     conn.execute("UPDATE assessment SET progress = %s WHERE id = %s", (Jsonb(state), aid))
     conn.commit()
 
 
-def _mark_failed(conn: psycopg.Connection, aid: int, stage: dict, error: Exception) -> None:
+def _mark_failed(conn: Conn, aid: int, stage: dict, error: Exception) -> None:
     conn.rollback()
     conn.execute(
         """UPDATE assessment SET status = 'failed', superseded = true, finished_at = now(), error = %s, error_stage = %s
@@ -495,7 +501,7 @@ def _mark_failed(conn: psycopg.Connection, aid: int, stage: dict, error: Excepti
     conn.commit()
 
 
-def recover_stale_assessments(conn: psycopg.Connection, minutes: int = STALE_RUNNING_MINUTES) -> int:
+def recover_stale_assessments(conn: Conn, minutes: int = STALE_RUNNING_MINUTES) -> int:
     """A worker that died cannot mark its own run failed; close runs with no live job after a time limit."""
     n = conn.execute(
         """UPDATE assessment a SET status = 'failed', superseded = true, finished_at = now(), error_stage = 'interrupted',
@@ -507,7 +513,7 @@ def recover_stale_assessments(conn: psycopg.Connection, minutes: int = STALE_RUN
     return n
 
 
-def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM, today: date | None = None,
+def assess_lot(conn: Conn, lot_id: int, profile_id: int, llm: LLM, today: date | None = None,
                http=None, emb: Embedder | None = None, rr: Reranker | None = None, mode: str = "full",
                reason: str | None = None, version_id: int | None = None, carry: dict[int, int] | None = None,
                pmap: dict[int, int] | None = None, shadow: bool = False, agent: bool | None = None,
@@ -532,7 +538,7 @@ def assess_lot(conn: psycopg.Connection, lot_id: int, profile_id: int, llm: LLM,
     return aid
 
 
-def _record_verdict_links(conn: psycopg.Connection, vid: int, req: dict, version_id: int, d: Decision, facts: list[Fact],
+def _record_verdict_links(conn: Conn, vid: int, req: dict, version_id: int, d: Decision, facts: list[Fact],
                           profile_id: int) -> None:
     """Citations, facts, conditions and every dependency, each tied to this verdict and so to this supplier."""
     def dep(kind: str, target_type: str, target: object, recorded_by: str) -> None:
@@ -565,7 +571,7 @@ def _record_verdict_links(conn: psycopg.Connection, vid: int, req: dict, version
                      (vid, req["id"], d.question, profile_id))
 
 
-def _run(conn: psycopg.Connection, aid: int, lot: dict, ctx: Context, profile_id: int, llm: LLM, http, emb, rr, version_id: int,
+def _run(conn: Conn, aid: int, lot: dict, ctx: Context, profile_id: int, llm: LLM, http, emb, rr, version_id: int,
          carry: dict[int, int], pmap: dict[int, int], shadow: bool, agent: bool | None, config: PipelineConfig | None,
          stage: dict, finalise: Callable[[int], None] | None) -> None:
     lot_id = lot["id"]
@@ -622,14 +628,14 @@ def _run(conn: psycopg.Connection, aid: int, lot: dict, ctx: Context, profile_id
             d.recorded_by, d.documents = "agent_trace", sorted(tools.read_docs)
         budget_hit |= d.decided_by == "budget"
         quality, uncertainty = evidence_quality(d, facts)
-        vid = conn.execute(
+        vid = must(conn.execute(
             """INSERT INTO verdict (assessment_id, requirement_id, status, reason, basis, needs_human, provisional,
                                     question, escalate, escalate_reason, decided_by, required, observed, evidence_quality,
                                     uncertainty, retrieval, reference_gaps)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
             (aid, req["id"], d.status, d.reason, d.basis, d.needs_human, inv["coverage"] != "complete", d.question,
              bool(d.escalate), "; ".join(dict.fromkeys(d.escalate)) or None, d.decided_by, d.required, d.observed, quality, uncertainty,
-             Jsonb(d.retrieval), d.gaps)).fetchone()["id"]
+             Jsonb(d.retrieval), d.gaps)).fetchone())["id"]
         _record_verdict_links(conn, vid, req, version_id, d, facts, profile_id)
         status = d.status
         if d.status == NOT_MET and (o := _overridden(req, overridden, _lineage(conn, req))):
@@ -642,12 +648,12 @@ def _run(conn: psycopg.Connection, aid: int, lot: dict, ctx: Context, profile_id
     _progress(conn, aid, stage, stage="finalising")
     refs = [agg.Ref(r["label"], r["kind"], r["essential"], r["status"] if config.coverage else "read") for r in inv["documents"]]
     product_cpv = [c for f in facts if f.attribute == "product" for c in f.value.get("cpv", [])]
-    region = next((f.value.get("itl", []) for f in facts if f.attribute == "region"), [])
+    region: list[str] = next((f.value.get("itl", []) for f in facts if f.attribute == "region"), [])
     rel = agg.relevance(ctx.fields["lot.cpv"] or [], product_cpv, ctx.fields["lot.regions"] or [], region)
-    rejected = conn.execute(
+    rejected = must(conn.execute(
         """SELECT count(*) n FROM requirement_rejection rj LEFT JOIN passage p ON p.id = rj.passage_id LEFT JOIN document d ON d.id = p.document_id
            WHERE rj.version_id = %s AND rj.obligation = 'mandatory' AND rj.kind <> 'condition'
-             AND (d.owner_profile_id IS NULL OR d.owner_profile_id = %s)""", (version_id, profile_id)).fetchone()["n"]
+             AND (d.owner_profile_id IS NULL OR d.owner_profile_id = %s)""", (version_id, profile_id)).fetchone())["n"]
     dims = agg.dimensions(vs, refs, rel, inv["coverage"], rejected)
     # One transaction: the old assessment stops being current exactly when the new one becomes current.
     if not shadow:

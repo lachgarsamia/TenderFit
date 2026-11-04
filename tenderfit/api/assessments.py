@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from tenderfit.api.deps import Identity, current_profile, current_user
 from tenderfit.assessment.confirm import ConfirmationError, ConfirmationNotFound, confirm
 from tenderfit.config import settings
-from tenderfit.db import connect
+from tenderfit.db import connect, must
 from tenderfit.documents import service as docs
 from tenderfit.jobs import queue
 from tenderfit.profile import service as profiles
@@ -156,8 +156,8 @@ def get_assessment(lot_id: int, profile_id: int) -> dict:
                       (SELECT recommendation FROM assessment x WHERE x.lot_id = l.id AND x.profile_id = %s AND x.status = 'done'
                        AND NOT x.superseded AND NOT x.shadow LIMIT 1) AS recommendation
                FROM lot l WHERE l.opportunity_id = %s ORDER BY l.lot_no""", (profile_id, lot["opportunity_id"])).fetchall()
-        fictional = conn.execute("SELECT ocid LIKE 'ocds-test-%%' f FROM opportunity WHERE id = %s",
-                                 (lot["opportunity_id"],)).fetchone()["f"]
+        fictional = must(conn.execute("SELECT ocid LIKE 'ocds-test-%%' f FROM opportunity WHERE id = %s",
+                                 (lot["opportunity_id"],)).fetchone())["f"]
     status = effective_status(lot["opp_status"], lot["status_reason"], lot["deadline"], lot["last_checked_at"],
                               datetime.now(timezone.utc))
     return {
@@ -282,10 +282,11 @@ def post_evidence(kind: str = Form(..., max_length=40), file: UploadFile = File(
         except profiles.ProfileError as e:
             raise HTTPException(422, str(e))
         verified = profiles.link_support(conn, fact_id, eid, page, quote) if fact_id and quote else None
-        pairs = _lots_using(conn, profiles.verdicts_using(conn, [fact_id]), profile_id) if verified else []
         conn.commit()
-        return {"evidence_file_id": eid, "support_verified": verified,
-                "jobs": enqueue_profile_change(conn, pairs, [fact_id], "evidence added") if pairs else []}
+        jobs: list[int] = []
+        if verified and fact_id:
+            jobs = enqueue_profile_change(conn, _lots_using(conn, profiles.verdicts_using(conn, [fact_id]), profile_id), [fact_id], "evidence added")
+        return {"evidence_file_id": eid, "support_verified": verified, "jobs": jobs}
 
 
 @router.post("/profile/facts/{fact_id}/renew")
@@ -328,8 +329,8 @@ def answer(question_id: int, body: AnswerIn, profile_id: int = Depends(current_p
                             RETURNING verdict_id""", (body.answer, me.email, question_id, profile_id)).fetchone()
         if not q:
             raise HTTPException(404, "question not found")
-        a = conn.execute("SELECT a.lot_id, a.profile_id FROM verdict v JOIN assessment a ON a.id = v.assessment_id "
-                         "WHERE v.id = %s", (q["verdict_id"],)).fetchone()
+        a = must(conn.execute("SELECT a.lot_id, a.profile_id FROM verdict v JOIN assessment a ON a.id = v.assessment_id "
+                         "WHERE v.id = %s", (q["verdict_id"],)).fetchone())
         conn.commit()
         return {"jobs": enqueue_assess(conn, [(a["lot_id"], a["profile_id"])], "question answered")}
 
@@ -339,7 +340,6 @@ class ConfirmIn(BaseModel):
     target_id: int
     decision: str
     reason: str | None = Field(default=None, max_length=4000)
-    payload: dict | None = None
     payload: dict | None = None
 
 

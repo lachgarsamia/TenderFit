@@ -1,8 +1,7 @@
 """Deterministic check: does another passage state the same obligation with a different number?"""
 import re
 
-import psycopg
-
+from tenderfit.db import Conn
 from tenderfit.documents.text import normalise
 from tenderfit.extraction.validate import numbers_in, unit_in
 
@@ -16,7 +15,7 @@ def _terms(text: str) -> set[str]:
     return {w.rstrip("s") for w in normalise(text).split() if w not in STOP and not w.isdigit() and not numbers_in(w)}
 
 
-def find_conflicts(conn: psycopg.Connection, version_id: int, passage_id: int, quote: str, profile_id: int | None) -> list[dict]:
+def find_conflicts(conn: Conn, version_id: int, passage_id: int, quote: str, profile_id: int | None) -> list[dict]:
     """Sentences elsewhere in the pack that share most of the quote's wording and its unit, but state another number."""
     numbers, unit, terms = numbers_in(quote), unit_in(quote), _terms(quote)
     if not numbers or len(terms) < 3:

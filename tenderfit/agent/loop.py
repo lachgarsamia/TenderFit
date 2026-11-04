@@ -2,10 +2,10 @@ import json
 import time
 from dataclasses import dataclass, field
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from tenderfit.config import settings
+from tenderfit.db import Conn, must
 from tenderfit.llm import LLM, UNTRUSTED_RULE, LLMError, log_call, untrusted
 from tenderfit.profile.validity import check
 from tenderfit.retrieval.search import Embedder, Reranker, search
@@ -101,7 +101,7 @@ def _passage_out(p: dict) -> dict:
 
 
 class Tools:
-    def __init__(self, conn: psycopg.Connection, version_id: int, facts: list[Fact], ctx: Context,
+    def __init__(self, conn: Conn, version_id: int, facts: list[Fact], ctx: Context,
                  emb: Embedder | None, rr: Reranker | None, profile_id: int | None = None):
         self.conn, self.version_id, self.facts, self.ctx, self.emb, self.rr = conn, version_id, facts, ctx, emb, rr
         self.profile_id = profile_id
@@ -148,12 +148,12 @@ class Tools:
                LEFT JOIN document d ON d.id = coalesce(s.document_id, r.document_id)
                WHERE r.version_id = %(v)s AND (r.owner_profile_id IS NULL OR r.owner_profile_id = %(p)s)
                  AND (lower(r.label) LIKE %(l)s OR lower(coalesce(d.filename, '')) LIKE %(l)s)
-               ORDER BY coalesce(s.status, r.status) = 'read' DESC LIMIT 1""",
+               ORDER BY coalesce(s.status, r.status) IN ('read', 'partial') DESC LIMIT 1""",
             {"v": self.version_id, "p": self.profile_id, "l": f"%{label.lower()}%"}).fetchone()
         if not ref:
             return {"error": f"no document called {label} is listed or referenced in this notice"}
         self.read_docs.add(ref["id"])
-        if ref["status"] != "read":
+        if ref["status"] not in ("read", "partial"):
             return {"document": ref["label"], "status": ref["status"], "note": ref["note"],
                     "essential": ref["essential"], "readable": False}
         rows = self._rows("""SELECT p.id, p.text, p.section, p.page, coalesce(d.filename, 'document') document FROM passage p
@@ -168,7 +168,7 @@ class Tools:
         refs = self.conn.execute(
             """SELECT r.id, coalesce(s.document_id, r.document_id) AS document_id FROM document_ref r
                LEFT JOIN document_ref_state s ON s.ref_id = r.id AND s.profile_id = %(p)s
-               WHERE r.version_id = %(v)s AND coalesce(s.status, r.status) = 'read'
+               WHERE r.version_id = %(v)s AND coalesce(s.status, r.status) IN ('read', 'partial')
                  AND (r.owner_profile_id IS NULL OR r.owner_profile_id = %(p)s)
                  AND (r.ocds_type = 'clarifications' OR lower(r.label) LIKE '%%clarif%%')""",
             {"v": self.version_id, "p": self.profile_id}).fetchall()
@@ -210,15 +210,15 @@ class Tools:
         return {"status": r.status, "reason": r.reason, "fact_ids": r.facts, "reads_fields": r.params}
 
 
-def run_agent(conn: psycopg.Connection, assessment_id: int, version_id: int, req: dict, facts: list[Fact], ctx: Context,
+def run_agent(conn: Conn, assessment_id: int, version_id: int, req: dict, facts: list[Fact], ctx: Context,
               llm: LLM, budget: Budget, b2_reason: str, escalated_because: list[str], emb: Embedder | None = None,
               rr: Reranker | None = None, profile_id: int | None = None):
     from tenderfit.assessment.pipeline import Decision, guard
 
     tools = Tools(conn, version_id, facts, ctx, emb, rr, profile_id)
     tools.requirement = f"{req['statement']} {req['quote']}"
-    src = conn.execute("""SELECT p.id, p.text, p.section, p.page, coalesce(d.filename, 'document') document FROM passage p
-                          JOIN document d ON d.id = p.document_id WHERE p.id = %s""", (req["passage_id"],)).fetchone()
+    src = must(conn.execute("""SELECT p.id, p.text, p.section, p.page, coalesce(d.filename, 'document') document FROM passage p
+                          JOIN document d ON d.id = p.document_id WHERE p.id = %s""", (req["passage_id"],)).fetchone())
     tools.seen[src["id"]] = dict(src)
     user = (f"Requirement ({req['obligation']}, {req['category']}): {req['statement']}\n"
             f"Equivalent allowed: {req['equivalent_allowed']}. Evidence the buyer asks for: {', '.join(req['evidence_needed']) or 'not stated'}.\n"

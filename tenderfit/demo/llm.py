@@ -89,7 +89,10 @@ def _facts(user: str) -> list[dict]:
 
 def _verdict(user: str) -> dict:
     facts = _facts(user)
-    pid = int(re.search(r"\(passage (\d+)\)", user).group(1))
+    source = re.search(r"\(passage (\d+)\)", user)
+    if source is None:
+        raise LLMError("the verdict prompt names no source passage")
+    pid = int(source.group(1))
     ids = lambda attr: [f["id"] for f in facts if f["attribute"] == attr]  # noqa: E731
 
     def out(status, reason, support=None, quote=None, question=None, conflict=False):

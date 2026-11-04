@@ -54,7 +54,7 @@ def _fit(conn, lot_ids: list[int], profile_id: int, profile: dict) -> dict[int, 
             out[lid] = {"assessed": True, "kind": kind, "label": head, "detail": rest.strip(), "provisional": a["provisional"],
                         "coverage": a["coverage"]}
             continue
-        lf = next((x for x in lots[lid]["f"].get("lots", []) if x["id"] == lots[lid]["lot_no"]), {})
+        lf: dict = next((x for x in lots[lid]["f"].get("lots", []) if x["id"] == lots[lid]["lot_no"]), {})
         rel = agg.relevance(lf.get("cpv") or lots[lid]["cpv_codes"], profile["cpv"], lf.get("regions") or lots[lid]["regions"],
                             profile["regions"])
         out[lid] = {"assessed": False, "kind": "low" if rel["level"] == "low" else "unassessed",
@@ -93,7 +93,8 @@ def search(body: SearchIn, profile_id: int = Depends(current_profile)):
         from_profile = not body.q.strip()
         cpv = body.cpv if body.cpv is not None else (sorted({c[:3] for c in profile["cpv"]}) if from_profile else parsed["cpv"])
         regions = body.regions if body.regions is not None else (profile["regions"] if from_profile else parsed["regions"])
-        where, args = ["TRUE"], []
+        where: list[str] = ["TRUE"]
+        args: list = []
         if cpv:
             where.append("EXISTS (SELECT 1 FROM unnest(o.cpv_codes) c WHERE c LIKE ANY(%s))")
             args.append([f"{c}%" for c in cpv])
@@ -138,7 +139,7 @@ def search(body: SearchIn, profile_id: int = Depends(current_profile)):
     for r in closed:
         gone.append(item(r, effective_status(r["status"], r["status_reason"], r["deadline"], r["last_checked_at"], now)))
     order = {"relevant": 0, "provisional": 1, "blocker": 2, "unassessed": 3, "low": 4}
-    shortlist.sort(key=lambda o: (min((order.get((l["fit"] or {}).get("kind"), 5) for l in o["lots"]), default=5),
+    shortlist.sort(key=lambda o: (min((order.get((l["fit"] or {}).get("kind", ""), 5) for l in o["lots"]), default=5),
                                   o["deadline"] or now + timedelta(days=999)))
     return {"parsed": {"regions": regions, "cpv": cpv, "terms": parsed["terms"], "from_profile": from_profile},
             "last_import": wm and wm["watermark"], "shortlist": shortlist[:body.limit], "no_longer_open": gone}

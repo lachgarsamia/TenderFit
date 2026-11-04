@@ -7,8 +7,16 @@ from psycopg.rows import dict_row
 
 from tenderfit.config import settings
 
-Conn = psycopg.Connection[dict[str, Any]]
+Row = dict[str, Any]
+Conn = psycopg.Connection[Row]
 MIGRATIONS = Path(__file__).resolve().parent.parent / "migrations"
+
+
+def must(row: Row | None) -> Row:
+    """For a query that returns a row by construction: if it does not, stop here and say so."""
+    if row is None:
+        raise LookupError("expected a database row, found none")
+    return row
 
 
 def connect(url: str | None = None) -> Conn:

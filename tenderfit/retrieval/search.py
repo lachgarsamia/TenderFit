@@ -3,9 +3,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Protocol
 
-import psycopg
-
 from tenderfit.config import settings
+from tenderfit.db import Conn
 
 RRF_K = 60
 STOP = {"the", "and", "for", "with", "shall", "must", "will", "any", "all", "are", "per", "from", "that", "this",
@@ -62,7 +61,7 @@ def _vec(v: list[float]) -> str:
     return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
 
 
-def index_version(conn: psycopg.Connection, version_id: int, emb: Embedder | None = None) -> int:
+def index_version(conn: Conn, version_id: int, emb: Embedder | None = None) -> int:
     rows = conn.execute(
         """SELECT p.id, coalesce(p.section, '') || E'\n' || p.text AS t FROM passage p JOIN document d ON d.id = p.document_id
            WHERE d.version_id = %s AND p.embedding IS NULL""", (version_id,)).fetchall()
@@ -94,7 +93,7 @@ class Hit:
     why: list[str] = field(default_factory=list)
 
 
-def search(conn: psycopg.Connection, version_id: int, query: str, k: int = 5, pool: int = 50, rerank_top: int = 20,
+def search(conn: Conn, version_id: int, query: str, k: int = 5, pool: int = 50, rerank_top: int = 20,
            emb: Embedder | None = None, rr: Reranker | None = None, exclude: set[int] | None = None,
            hybrid: bool = True, profile_id: int | None = None, graph_links: list[dict] | None = None) -> list[Hit]:
     """Lexical and vector candidates fused by RRF, reranked, top k. Only public passages and this supplier's own are searched.

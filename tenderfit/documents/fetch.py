@@ -54,7 +54,7 @@ def is_public_url(url: str) -> bool:
         infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
     except (OSError, UnicodeError):
         return False
-    return bool(infos) and all(ipaddress.ip_address(i[4][0].split("%")[0]).is_global for i in infos)
+    return bool(infos) and all(ipaddress.ip_address(str(i[4][0]).split("%")[0]).is_global for i in infos)
 
 
 def fetch(url: str, http: httpx.Client | None = None) -> Fetched:

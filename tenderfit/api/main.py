@@ -91,7 +91,8 @@ def import_status():
 def opportunities(cpv: list[str] = Query(default=[]), region: list[str] = Query(default=[]),
                   open_only: bool = True, q: str | None = None, limit: int = Query(50, le=200), offset: int = 0):
     now = datetime.now(timezone.utc)
-    where, args = ["TRUE"], []
+    where: list[str] = ["TRUE"]
+    args: list = []
     if cpv:
         where.append("EXISTS (SELECT 1 FROM unnest(o.cpv_codes) c WHERE c LIKE ANY(%s))")
         args.append([f"{c}%" for c in cpv])

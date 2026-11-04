@@ -113,6 +113,8 @@ def _lots(tender: dict) -> list[dict]:
 def normalise(release: dict) -> Version | Linked | None:
     ocid, rid = release["ocid"], release["id"]
     published = parse_ts(release["date"])
+    if published is None:
+        raise ValueError(f"release {rid} has no date")
     nt = notice_type(release)
     tags = set(release.get("tag", []))
 
@@ -127,6 +129,7 @@ def normalise(release: dict) -> Version | Linked | None:
         return None
     tender = release.get("tender", {})
     deadline_raw = tender.get("tenderPeriod", {}).get("endDate")
+    deadline = parse_ts(deadline_raw)
     own = next((d for d in notice_docs(release) if d.get("id") == rid), None)
     fields = {
         "title": tender.get("title"),
@@ -137,7 +140,7 @@ def normalise(release: dict) -> Version | Linked | None:
         "legal_basis": tender.get("legalBasis", {}).get("id"),
         "procurement_method": tender.get("procurementMethodDetails") or tender.get("procurementMethod"),
         "deadline_raw": deadline_raw,
-        "deadline": parse_ts(deadline_raw).isoformat() if deadline_raw else None,
+        "deadline": deadline.isoformat() if deadline else None,
         "value": tender.get("value"),
         "cpv": _cpv(tender),
         "regions": _regions(tender),

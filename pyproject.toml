@@ -41,3 +41,8 @@ extend-exclude = ["web"]
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 ignore = ["E731", "E501", "E741"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+packages = ["tenderfit"]

@@ -1,20 +1,22 @@
 from dataclasses import asdict
 
-import psycopg
 from psycopg.types.json import Jsonb
 from rapidfuzz import fuzz
 
 from tenderfit.assessment.pipeline import assess_lot
 from tenderfit.changes.diff import Change, PassageChange, align, classify, field_diff
 from tenderfit.changes.impact import Plan, load_deps, plan_reassessment
+from tenderfit.db import Conn, must
 from tenderfit.documents import service as docs
 from tenderfit.documents.text import normalise
 from tenderfit.extraction.extract import extract_version
 from tenderfit.jobs import queue
 from tenderfit.llm import LLM
 
+READABLE = ("read", "partial")
 
-def _passages(conn: psycopg.Connection, document_id: int) -> list[dict]:
+
+def _passages(conn: Conn, document_id: int) -> list[dict]:
     return conn.execute("SELECT id, sha256, section, text FROM passage WHERE document_id = %s ORDER BY ordinal",
                         (document_id,)).fetchall()
 
@@ -23,7 +25,7 @@ def _ref_key(r: dict) -> tuple:
     return (r["kind"], r["label"].lower(), r["ocds_type"])
 
 
-def detect(conn: psycopg.Connection, old_vid: int, new_vid: int, http=None) -> tuple[int, Change]:
+def detect(conn: Conn, old_vid: int, new_vid: int, http=None) -> tuple[int, Change]:
     docs.process_version(conn, old_vid, http)
     docs.process_version(conn, new_vid, http)
     # The public pack only: a supplier's private uploads are not part of what the buyer changed.
@@ -32,31 +34,31 @@ def detect(conn: psycopg.Connection, old_vid: int, new_vid: int, http=None) -> t
     change = Change()
     for key in sorted(set(old_refs) | set(new_refs), key=str):
         o, n = old_refs.get(key), new_refs.get(key)
-        label = (n or o)["label"]
+        label = must(n or o)["label"]
         if o and n:
-            if n["status"] == "unreadable" and o["status"] == "read":
+            if n["status"] == "unreadable" and o["status"] in READABLE:
                 change.documents.append({"kind": "unreadable", "label": label, "essential": n["essential"]})
-            if o["status"] == "read" and n["status"] == "read":
+            if o["status"] in READABLE and n["status"] in READABLE:
                 change.passages += align(_passages(conn, o["document_id"]), _passages(conn, n["document_id"]), label)
             elif o["status"] != n["status"]:
-                change.documents.append({"kind": "added" if n["status"] == "read" else "removed", "label": label,
+                change.documents.append({"kind": "added" if n["status"] in READABLE else "removed", "label": label,
                                          "essential": n["essential"]})
-                if n["status"] == "read":
+                if n["status"] in READABLE:
                     change.passages += align([], _passages(conn, n["document_id"]), label)
         elif n:
             change.documents.append({"kind": "added", "label": label, "essential": n["essential"]})
-            if n["status"] == "read":
+            if n["status"] in READABLE:
                 change.passages += align([], _passages(conn, n["document_id"]), label)
             elif n["status"] == "unreadable":
                 change.documents.append({"kind": "unreadable", "label": label, "essential": n["essential"]})
-        else:
+        elif o:
             change.documents.append({"kind": "removed", "label": label, "essential": o["essential"]})
-            if o["status"] == "read":
+            if o["status"] in READABLE:
                 change.passages += align(_passages(conn, o["document_id"]), [], label)
     labels = sorted({d["label"].lower() for d in change.documents})
     change.document_ref_ids = {r["id"] for r in conn.execute(
         "SELECT id FROM document_ref WHERE version_id = %s AND lower(label) = ANY(%s)", (old_vid, labels))}
-    f_old, f_new = (conn.execute("SELECT fields FROM notice_version WHERE id = %s", (v,)).fetchone()["fields"]
+    f_old, f_new = (must(conn.execute("SELECT fields FROM notice_version WHERE id = %s", (v,)).fetchone())["fields"]
                     for v in (old_vid, new_vid))
     change.fields = [f for f in field_diff(f_old, f_new) if f.path != "notice.documents"]
     # Private copies are byte-identical across versions, so requirements read from them carry over unchanged.
@@ -72,8 +74,8 @@ def detect(conn: psycopg.Connection, old_vid: int, new_vid: int, http=None) -> t
     mandatory = {r["passage_id"] for r in conn.execute(
         "SELECT passage_id FROM requirement WHERE version_id = %s AND obligation = 'mandatory'", (old_vid,))}
     classify(change, mandatory)
-    opp = conn.execute("SELECT opportunity_id FROM notice_version WHERE id = %s", (new_vid,)).fetchone()["opportunity_id"]
-    cid = conn.execute(
+    opp = must(conn.execute("SELECT opportunity_id FROM notice_version WHERE id = %s", (new_vid,)).fetchone())["opportunity_id"]
+    cid = must(conn.execute(
         """INSERT INTO change_event (opportunity_id, kind, from_version_id, to_version_id, cls, reasons, fields, passages, documents)
            VALUES (%s, 'version', %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (from_version_id, to_version_id) WHERE kind = 'version' DO UPDATE
@@ -81,7 +83,7 @@ def detect(conn: psycopg.Connection, old_vid: int, new_vid: int, http=None) -> t
                    documents = EXCLUDED.documents
            RETURNING id""",
         (opp, old_vid, new_vid, change.cls, change.reasons, Jsonb([asdict(f) for f in change.fields]),
-         Jsonb([asdict(p) for p in change.passages if p.kind != "unchanged"]), Jsonb(change.documents))).fetchone()["id"]
+         Jsonb([asdict(p) for p in change.passages if p.kind != "unchanged"]), Jsonb(change.documents))).fetchone())["id"]
     # A later notice replaced the target of an unfinished event from the same version: it will never be applied.
     conn.execute("""UPDATE change_event SET status = 'superseded', finished_at = now()
                     WHERE kind = 'version' AND from_version_id = %s AND to_version_id <> %s AND status <> 'applied'""",
@@ -90,18 +92,18 @@ def detect(conn: psycopg.Connection, old_vid: int, new_vid: int, http=None) -> t
     return cid, change
 
 
-def _existing_preparation(conn: psycopg.Connection, old_vid: int, new_vid: int) -> dict | None:
+def _existing_preparation(conn: Conn, old_vid: int, new_vid: int) -> dict | None:
     return conn.execute("SELECT added, removed FROM version_preparation WHERE from_version_id = %s AND to_version_id = %s",
                         (old_vid, new_vid)).fetchone()
 
 
-def _record_preparation(conn: psycopg.Connection, old_vid: int, new_vid: int, added: list, removed: list) -> dict:
+def _record_preparation(conn: Conn, old_vid: int, new_vid: int, added: list, removed: list) -> dict:
     conn.execute("INSERT INTO version_preparation (from_version_id, to_version_id, added, removed) VALUES (%s, %s, %s, %s)",
                  (old_vid, new_vid, Jsonb(added), Jsonb(removed)))
     return {"added": added, "removed": removed}
 
 
-def prepare_full(conn: psycopg.Connection, old_vid: int, new_vid: int, llm: LLM) -> dict:
+def prepare_full(conn: Conn, old_vid: int, new_vid: int, llm: LLM) -> dict:
     """Extract the whole new version and pair it with the old one, as one transaction ending in a durable marker."""
     done = _existing_preparation(conn, old_vid, new_vid)
     if done:
@@ -117,7 +119,7 @@ def prepare_full(conn: psycopg.Connection, old_vid: int, new_vid: int, llm: LLM)
     return out
 
 
-def carry_requirements(conn: psycopg.Connection, old_vid: int, new_vid: int, change: Change, llm: LLM) -> dict:
+def carry_requirements(conn: Conn, old_vid: int, new_vid: int, change: Change, llm: LLM) -> dict:
     """Copy requirements whose source passage is unchanged; re-extract modified and added passages; pair old and new.
 
     All of it is one transaction: a failed extraction leaves nothing behind, so a retry starts clean."""
@@ -138,14 +140,14 @@ def carry_requirements(conn: psycopg.Connection, old_vid: int, new_vid: int, cha
         if r["passage_id"] not in unchanged:
             displaced.append(r)
             continue
-        nid = conn.execute(
+        nid = must(conn.execute(
             """INSERT INTO requirement (lot_id, lot_no, version_id, statement, category, obligation, condition, equivalent_allowed,
                                         evidence_needed, quote, passage_id, section, page, refs, defined_terms, quote_score, carried_from,
                                         scope, condition_note, extract_version, owner_profile_id)
                SELECT %s, lot_no, %s, statement, category, obligation, condition, equivalent_allowed, evidence_needed, quote, %s,
                       section, page, refs, defined_terms, quote_score, id, scope, condition_note, extract_version, owner_profile_id
                FROM requirement WHERE id = %s RETURNING id""",
-            (lots.get(r["lot_no"]) if r["lot_no"] else None, new_vid, pmap[r["passage_id"]], r["id"])).fetchone()["id"]
+            (lots.get(r["lot_no"]) if r["lot_no"] else None, new_vid, pmap[r["passage_id"]], r["id"])).fetchone())["id"]
         conn.execute("""INSERT INTO requirement_condition (requirement_id, ordinal, label, condition, quote, mandatory, evidence_needed, condition_note)
                         SELECT %s, ordinal, label, condition, quote, mandatory, evidence_needed, condition_note
                         FROM requirement_condition WHERE requirement_id = %s""", (nid, r["id"]))
@@ -166,7 +168,7 @@ def carry_requirements(conn: psycopg.Connection, old_vid: int, new_vid: int, cha
     return out
 
 
-def pair_requirements(conn: psycopg.Connection, old: list[dict], new: list[dict]) -> tuple[list[dict], list[dict]]:
+def pair_requirements(conn: Conn, old: list[dict], new: list[dict]) -> tuple[list[dict], list[dict]]:
     """Link re-extracted requirements to the ones they replace (carried_from); return introduced and removed ones."""
     used, removed = set(), []
     for o in old:
@@ -182,7 +184,7 @@ def pair_requirements(conn: psycopg.Connection, old: list[dict], new: list[dict]
     return added, removed
 
 
-def _verdicts(conn: psycopg.Connection, aid: int) -> dict[int, dict]:
+def _verdicts(conn: Conn, aid: int) -> dict[int, dict]:
     return {r["requirement_id"]: r for r in conn.execute(
         """SELECT v.*, r.statement, r.carried_from, r.obligation FROM verdict v JOIN requirement r ON r.id = v.requirement_id
            WHERE v.assessment_id = %s""", (aid,))}
@@ -211,7 +213,7 @@ def explain(change: Change, plan: Plan, before: dict, after: dict, rec_before: s
     return head + "\n" + "\n".join(f"- {line}" for line in lines)
 
 
-def apply_version_change(conn: psycopg.Connection, change_id: int, change: Change, old_vid: int, new_vid: int, llm: LLM,
+def apply_version_change(conn: Conn, change_id: int, change: Change, old_vid: int, new_vid: int, llm: LLM,
                          static_deps: bool = False, **assess_kw) -> tuple[list[int], list[str]]:
     """Reassess every current assessment on the old version. Each lot and profile succeeds or fails on its own.
 
@@ -234,7 +236,7 @@ def apply_version_change(conn: psycopg.Connection, change_id: int, change: Chang
     return impacts, errors
 
 
-def _apply_to_assessment(conn: psycopg.Connection, change_id: int, change: Change, plan: Plan, prep: dict, new_reqs: list[dict],
+def _apply_to_assessment(conn: Conn, change_id: int, change: Change, plan: Plan, prep: dict, new_reqs: list[dict],
                          a: dict, new_vid: int, llm: LLM, assess_kw: dict) -> int:
     before = _verdicts(conn, a["id"])
     affected_old = plan.reassess | plan.rules_only
@@ -261,12 +263,12 @@ def _apply_to_assessment(conn: psycopg.Connection, change_id: int, change: Chang
         recs = conn.execute("SELECT id, recommendation FROM assessment WHERE id = ANY(%s)", ([a["id"], aid],)).fetchall()
         rec = {r["id"]: r["recommendation"] for r in recs}
         text = explain(change, plan, before, after, rec.get(a["id"]), rec.get(aid), kept, affected)
-        iid = conn.execute(
+        iid = must(conn.execute(
             """INSERT INTO change_impact (change_id, lot_id, profile_id, before_assessment_id, after_assessment_id, mode, reason,
                                           affected, requirements_added, requirements_removed, kept, explanation)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
             (change_id, a["lot_id"], a["profile_id"], a["id"], aid, plan.mode, plan.reason, Jsonb(affected),
-             Jsonb(prep.get("added", [])), Jsonb(prep.get("removed", [])), kept, text)).fetchone()["id"]
+             Jsonb(prep.get("added", [])), Jsonb(prep.get("removed", [])), kept, text)).fetchone())["id"]
         pursued = conn.execute("SELECT 1 FROM lot_decision WHERE lot_id = %s AND profile_id = %s AND decision = 'pursue'",
                                (a["lot_id"], a["profile_id"])).fetchone()
         if plan.mode == "targeted" and pursued:
@@ -278,10 +280,10 @@ def _apply_to_assessment(conn: psycopg.Connection, change_id: int, change: Chang
     return written[0]
 
 
-def shadow_full(conn: psycopg.Connection, impact_id: int, llm: LLM, **assess_kw) -> dict:
+def shadow_full(conn: Conn, impact_id: int, llm: LLM, **assess_kw) -> dict:
     """Full reassessment in the background for a pursued lot; any mandatory disagreement is a missed dependency."""
-    imp = conn.execute("SELECT * FROM change_impact WHERE id = %s", (impact_id,)).fetchone()
-    targeted = conn.execute("SELECT * FROM assessment WHERE id = %s", (imp["after_assessment_id"],)).fetchone()
+    imp = must(conn.execute("SELECT * FROM change_impact WHERE id = %s", (impact_id,)).fetchone())
+    targeted = must(conn.execute("SELECT * FROM assessment WHERE id = %s", (imp["after_assessment_id"],)).fetchone())
     sid = assess_lot(conn, imp["lot_id"], imp["profile_id"], llm, version_id=targeted["version_id"], mode="full",
                      reason="background full reassessment of a pursued lot", shadow=True, **assess_kw)
     t, s = _verdicts(conn, targeted["id"]), _verdicts(conn, sid)
@@ -303,7 +305,7 @@ class ChangeProcessingError(Exception):
 AMENDMENT_LOCK = 7002
 
 
-def pending_version_changes(conn: psycopg.Connection, respect_backoff: bool = False) -> list[tuple[int, int]]:
+def pending_version_changes(conn: Conn, respect_backoff: bool = False) -> list[tuple[int, int]]:
     """Current assessments behind the notice's current version, unless that event has used up its attempts.
 
     With respect_backoff, a recently failed event waits, doubling from two minutes, before it counts as pending again."""
@@ -317,7 +319,7 @@ def pending_version_changes(conn: psycopg.Connection, respect_backoff: bool = Fa
            ORDER BY 1, 2""", (MAX_EVENT_ATTEMPTS, respect_backoff))]
 
 
-def record_status_changes(conn: psycopg.Connection) -> int:
+def record_status_changes(conn: Conn) -> int:
     n = 0
     for r in conn.execute(
             """SELECT DISTINCT o.id, o.status, o.status_reason FROM opportunity o JOIN lot l ON l.opportunity_id = o.id
@@ -330,23 +332,23 @@ def record_status_changes(conn: psycopg.Connection) -> int:
     return n
 
 
-def _start_event(conn: psycopg.Connection, change_id: int) -> None:
+def _start_event(conn: Conn, change_id: int) -> None:
     conn.execute("""UPDATE change_event SET status = 'processing', attempts = attempts + 1, started_at = now(), finished_at = NULL
                     WHERE id = %s""", (change_id,))
     conn.commit()
 
 
-def _finish_event(conn: psycopg.Connection, change_id: int, errors: list[str]) -> None:
+def _finish_event(conn: Conn, change_id: int, errors: list[str]) -> None:
     conn.execute("UPDATE change_event SET status = %s, last_error = %s, finished_at = now() WHERE id = %s",
                  ("failed" if errors else "applied", "; ".join(errors)[:2000] or None, change_id))
     conn.commit()
 
 
-def process_pending(conn: psycopg.Connection, llm: LLM, http=None, **assess_kw) -> list[int]:
+def process_pending(conn: Conn, llm: LLM, http=None, **assess_kw) -> list[int]:
     """Apply every outstanding amendment. An event is applied only after all its lots and profiles succeeded.
 
     One process at a time: a second caller, such as a worker alongside a command, leaves the work to the first."""
-    if not conn.execute("SELECT pg_try_advisory_lock(%s) AS got", (AMENDMENT_LOCK,)).fetchone()["got"]:
+    if not must(conn.execute("SELECT pg_try_advisory_lock(%s) AS got", (AMENDMENT_LOCK,)).fetchone())["got"]:
         conn.rollback()
         return []
     conn.commit()
@@ -358,7 +360,7 @@ def process_pending(conn: psycopg.Connection, llm: LLM, http=None, **assess_kw) 
         conn.commit()
 
 
-def _process_pending(conn: psycopg.Connection, llm: LLM, http, assess_kw: dict) -> list[int]:
+def _process_pending(conn: Conn, llm: LLM, http, assess_kw: dict) -> list[int]:
     out, failed = [], []
     for old, new in pending_version_changes(conn):
         cid = None
@@ -382,7 +384,7 @@ def _process_pending(conn: psycopg.Connection, llm: LLM, http, assess_kw: dict) 
     return out
 
 
-def retry_event(conn: psycopg.Connection, change_id: int) -> bool:
+def retry_event(conn: Conn, change_id: int) -> bool:
     """A person asks for another try after the attempts ran out."""
     row = conn.execute("""UPDATE change_event SET status = 'detected', attempts = 0 WHERE id = %s AND kind = 'version'
                           AND status = 'failed' RETURNING id""", (change_id,)).fetchone()
@@ -392,7 +394,7 @@ def retry_event(conn: psycopg.Connection, change_id: int) -> bool:
     return bool(row)
 
 
-def apply_profile_change(conn: psycopg.Connection, lot_id: int, profile_id: int, fact_ids: list[int], llm: LLM,
+def apply_profile_change(conn: Conn, lot_id: int, profile_id: int, fact_ids: list[int], llm: LLM,
                          reason: str, **assess_kw) -> int | None:
     a = conn.execute("""SELECT * FROM assessment WHERE lot_id = %s AND profile_id = %s AND NOT superseded AND NOT shadow
                         AND status = 'done' ORDER BY id DESC LIMIT 1""", (lot_id, profile_id)).fetchone()
@@ -405,14 +407,14 @@ def apply_profile_change(conn: psycopg.Connection, lot_id: int, profile_id: int,
     before = _verdicts(conn, a["id"])
     affected_ids = plan.reassess | plan.rules_only
     carry = {rid: v["id"] for rid, v in before.items() if rid not in affected_ids}
-    opp = conn.execute("SELECT opportunity_id FROM lot WHERE id = %s", (lot_id,)).fetchone()["opportunity_id"]
+    opp = must(conn.execute("SELECT opportunity_id FROM lot WHERE id = %s", (lot_id,)).fetchone())["opportunity_id"]
 
     def finalise(aid: int) -> None:
         # The event and its impact appear only together with the assessment they describe.
-        cid = conn.execute(
+        cid = must(conn.execute(
             """INSERT INTO change_event (opportunity_id, kind, from_version_id, to_version_id, cls, reasons, summary, status, attempts)
                VALUES (%s, 'profile', %s, %s, 'local', %s, %s, 'applied', 1) RETURNING id""",
-            (opp, a["version_id"], a["version_id"], [reason], Jsonb({"facts": fact_ids, "profile_id": profile_id}))).fetchone()["id"]
+            (opp, a["version_id"], a["version_id"], [reason], Jsonb({"facts": fact_ids, "profile_id": profile_id}))).fetchone())["id"]
         after = _verdicts(conn, aid)
         affected = [{"requirement_id": rid, "statement": v["statement"], "before": before[rid]["status"] if rid in before else None,
                      "after": v["status"], "reason": v["reason"], "how": "fact used"}
