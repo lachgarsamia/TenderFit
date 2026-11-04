@@ -31,7 +31,7 @@ export default function Opportunities() {
 
   const run = async (query = q) => {
     setBusy(true); setError(null);
-    try { setData(await post("/search", { q: query, profile_id: profile!.id, limit: 40 })); }
+    try { setData(await post("/search", { q: query, limit: 40 })); }
     catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
   useEffect(() => { setQ(""); setTab(null); setData(null); run(""); }, [profile?.id]);

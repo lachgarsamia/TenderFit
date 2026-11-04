@@ -18,8 +18,8 @@ export default function Preparation() {
 
   useEffect(() => {
     setPlan(null); setError(null);
-    if (lotId) api(`/lots/${lotId}/preparation?profile_id=${profile!.id}`).then(setPlan).catch((e) => setError(e.message));
-    else api<any[]>(`/profiles/${profile!.id}/pursued`).then(setLots).catch((e) => setError(e.message));
+    if (lotId) api(`/lots/${lotId}/preparation`).then(setPlan).catch((e) => setError(e.message));
+    else api<any[]>("/profile/pursued").then(setLots).catch((e) => setError(e.message));
   }, [lotId, profile?.id]);
 
   if (!lotId) return (

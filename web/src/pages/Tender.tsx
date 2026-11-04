@@ -14,7 +14,7 @@ export default function Tender() {
   usePageTitle(t?.title ?? "Tender");
   useEffect(() => {
     setT(null); setError(null);
-    api(`/tenders/${tenderId}?profile_id=${profile!.id}`).then(setT).catch((e) => setError(e.message));
+    api(`/tenders/${tenderId}`).then(setT).catch((e) => setError(e.message));
   }, [tenderId, profile?.id]);
   if (error) return <><div className="crumb"><Link to="/opportunities">Opportunities</Link></div><ErrorNote error={error} /></>;
   if (!t) return <Card><Skeleton lines={6} /></Card>;
@@ -64,7 +64,7 @@ export default function Tender() {
           {docs.length === 0 ? <Empty title="No documents listed yet">They are listed when a lot is first opened.</Empty> : <ul className="plain-list">
             {docs.map((d: any) => <li key={d.id}>
               <div style={{ minWidth: 0 }}><div>{d.label}</div><div className="small muted">{d.note ?? ""}</div></div>
-              {d.status === "read" ? <Tag tone="ok">✓ Read</Tag> : d.status === "confirmed_none" ? <Tag>Buyer issued none</Tag> : <Tag tone="warn">Not read</Tag>}
+              {d.status === "read" ? <Tag tone="ok">✓ Read</Tag> : d.status === "partial" ? <Tag tone="warn">Partly read</Tag> : d.status === "confirmed_none" ? <Tag>Buyer issued none</Tag> : <Tag tone="warn">Not read</Tag>}
             </li>)}
           </ul>}
         </Card>

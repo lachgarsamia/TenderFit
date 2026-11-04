@@ -4,33 +4,50 @@ const SNAPSHOT: Record<string, any> = STATIC
   : {};
 export const SNAPSHOT_META = SNAPSHOT.__meta ?? null;
 
+let staticProfile: number | null = SNAPSHOT.profiles?.[0]?.id ?? null;
+const staticMe = () => ({ email: "read-only demo", profiles: SNAPSHOT.profiles ?? [], active_profile_id: staticProfile });
+
 function fromSnapshot<T>(path: string, init?: RequestInit): T {
   const method = (init?.method ?? "GET").toUpperCase();
-  if (method === "POST" && path === "/search") {
-    const body = JSON.parse(String(init?.body ?? "{}"));
-    const hit = SNAPSHOT[`POST /search?profile_id=${body.profile_id}`];
-    if (hit) return hit;
+  if (path === "/auth/me") return staticMe() as T;
+  if (method === "POST" && path === "/auth/active-profile") {
+    staticProfile = JSON.parse(String(init?.body)).profile_id;
+    return staticMe() as T;
   }
+  const supplier = SNAPSHOT.suppliers?.[String(staticProfile)] ?? {};
+  if (method === "POST" && path === "/search" && supplier["POST /search"]) return supplier["POST /search"];
   if (method !== "GET") throw new Error("This is a read-only demo, so actions that change data are switched off.");
-  if (path in SNAPSHOT) return SNAPSHOT[path];
-  if (path.includes("/assessment?")) throw new Error("no assessment yet");
+  if (path in supplier) return supplier[path];
+  if (path.endsWith("/assessment")) throw new Error("no assessment yet");
   throw new Error("This page is not part of the demo snapshot.");
 }
 
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+const BASE = "/api/v1";
+/** Announced when a session ends, so the whole app returns to sign-in instead of each page failing on its own. */
+export const SIGNED_OUT = "tenderfit:signed-out";
+
 export async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
   if (STATIC) return fromSnapshot<T>(path, init);
-  const r = await fetch(`/api${path}`, {
+  const r = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: init?.body && !(init.body instanceof FormData) ? { "content-type": "application/json", ...init?.headers } : init?.headers,
+    credentials: "same-origin",
+    headers: { "X-TenderFit": "1", ...(init?.body && !(init.body instanceof FormData) ? { "content-type": "application/json" } : {}), ...init?.headers },
   });
   if (!r.ok) {
     const body = await r.json().catch(() => ({}));
-    throw new Error(body.detail ?? `HTTP ${r.status}`);
+    if (r.status === 401 && !path.startsWith("/auth/")) window.dispatchEvent(new Event(SIGNED_OUT));
+    throw new ApiError(typeof body.detail === "string" ? body.detail : Array.isArray(body.detail) ? body.detail[0]?.msg ?? `HTTP ${r.status}` : `HTTP ${r.status}`, r.status);
   }
   return r.json();
 }
 
-export const fileUrl = (documentId: number, profileId: number) => `/api/documents/${documentId}/file?profile_id=${profileId}`;
+export const fileUrl = (documentId: number) => `${BASE}/documents/${documentId}/file`;
 
 export const post = <T = any>(path: string, body: unknown) => api<T>(path, { method: "POST", body: JSON.stringify(body) });
 

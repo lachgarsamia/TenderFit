@@ -2,6 +2,7 @@
 # Scans the working tree and the whole Git history with Gitleaks. Findings are redacted. Fails if anything is found outside dependencies.
 set -uo pipefail
 OUT=${OUT:-$(mktemp -d)}
+chmod 777 "$OUT"  # the scanner container runs as its own user
 IMAGE=zricethezav/gitleaks:v8.18.4
 docker run --rm -v "$PWD:/repo:ro" -v "$OUT:/out" "$IMAGE" detect --source /repo --report-format json --report-path /out/history.json --redact --no-banner --exit-code 0 2>&1 | tail -1
 docker run --rm -v "$PWD:/repo:ro" -v "$OUT:/out" "$IMAGE" detect --no-git --source /repo --report-format json --report-path /out/tree.json --redact --no-banner --exit-code 0 2>&1 | tail -1

@@ -1,18 +1,20 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { STATIC, SNAPSHOT_META, api, fmtDate } from "./api";
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { ApiError, SIGNED_OUT, STATIC, SNAPSHOT_META, api, fmtDate, post } from "./api";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { Icon } from "./components/ui";
+import { Icon, Skeleton } from "./components/ui";
 import Assessment from "./pages/Assessment";
 import Changes from "./pages/Changes";
+import { CreateProfile, SignIn } from "./pages/Account";
 import Opportunities from "./pages/Opportunities";
 import Preparation from "./pages/Preparation";
 import Profile from "./pages/Profile";
 import Tender from "./pages/Tender";
 
 export type Profile = { id: number; name: string; regions: string[]; description: string; is_fictional: boolean };
-type Ctx = { profile: Profile | null; refreshChanges: () => void };
-const ProfileContext = createContext<Ctx>({ profile: null, refreshChanges: () => {} });
+type Me = { email: string; profiles: Profile[]; active_profile_id: number | null };
+type Ctx = { profile: Profile | null; refreshChanges: () => void; refreshMe: () => Promise<void> };
+const ProfileContext = createContext<Ctx>({ profile: null, refreshChanges: () => {}, refreshMe: async () => {} });
 export const useProfile = () => useContext(ProfileContext);
 
 export function usePageTitle(title: string) {
@@ -20,25 +22,51 @@ export function usePageTitle(title: string) {
 }
 
 export default function App() {
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [profileId, setProfileId] = useState<number>(() => Number(localStorage.getItem("profileId") || 0));
+  const [me, setMe] = useState<Me | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "signed-out" | "unreachable">("loading");
   const [changes, setChanges] = useState(0);
-  const [failed, setFailed] = useState(false);
   const location = useLocation();
-  const profile = profiles.find((p) => p.id === profileId) ?? profiles[0] ?? null;
+  const navigate = useNavigate();
+  const profile = me?.profiles.find((p) => p.id === me.active_profile_id) ?? null;
 
-  useEffect(() => { api<Profile[]>("/profiles").then(setProfiles).catch(() => setFailed(true)); }, []);
+  const refreshMe = async () => {
+    try {
+      setMe(await api<Me>("/auth/me")); setState("ready");
+    } catch (e) {
+      setMe(null);
+      setState(e instanceof ApiError && e.status === 401 ? "signed-out" : "unreachable");
+    }
+  };
+  useEffect(() => { refreshMe(); }, []);
+  useEffect(() => {
+    const onSignedOut = () => { setMe(null); setState("signed-out"); };
+    window.addEventListener(SIGNED_OUT, onSignedOut);
+    return () => window.removeEventListener(SIGNED_OUT, onSignedOut);
+  }, []);
+
   const refreshChanges = () => {
-    // Only what still needs attention counts; the page itself reports a failure to load.
-    if (profile) api<any[]>(`/changes?profile_id=${profile.id}`)
+    if (profile) api<any[]>("/changes")
       .then((c) => setChanges(c.filter((e) => e.status !== "superseded").length))
       .catch((e) => console.warn("Could not refresh the change count", e));
   };
   useEffect(refreshChanges, [profile?.id]);
-  const choose = (id: number) => { localStorage.setItem("profileId", String(id)); setProfileId(id); };
+
+  const choose = async (id: number) => {
+    setMe(await post<Me>("/auth/active-profile", { profile_id: id }));
+    navigate("/opportunities");
+  };
+  const signOut = async () => {
+    await post("/auth/logout", {}).catch((e) => console.warn("Sign-out request failed", e));
+    setMe(null); setChanges(0); setState("signed-out"); navigate("/");
+  };
+
+  if (state === "loading") return <main className="centered"><div style={{ width: 320 }}><Skeleton lines={3} /></div></main>;
+  if (state === "unreachable") return <main className="centered"><div className="empty" role="alert"><strong>TenderFit can't reach its server.</strong>It may be restarting. Reload in a moment; if this stays, check that the API is running.</div></main>;
+  if (state === "signed-out" || !me) return <SignIn onDone={(m) => { setMe(m); setState("ready"); }} />;
+  if (me.profiles.length === 0) return <CreateProfile email={me.email} onDone={(m) => setMe(m)} onSignOut={signOut} />;
 
   return (
-    <ProfileContext.Provider value={{ profile, refreshChanges }}>
+    <ProfileContext.Provider value={{ profile, refreshChanges, refreshMe }}>
       <div className="shell">
         <aside className="side">
           <Link to="/opportunities" className="brand"><span className="brand-mark">✓</span> TenderFit</Link>
@@ -48,23 +76,24 @@ export default function App() {
             <NavLink to="/profile"><Icon name="building" />Business profile</NavLink>
             <NavLink to="/preparation"><Icon name="clipboard" />Bid preparation</NavLink>
           </nav>
-          {profiles.length > 0 && (
-            <div className="workspace">
-              <label htmlFor="ws">Workspace</label>
+          <div className="workspace">
+            {me.profiles.length > 1 ? <>
+              <label htmlFor="ws">Supplier</label>
               <select id="ws" value={profile?.id ?? ""} onChange={(e) => choose(Number(e.target.value))}>
-                {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {!profile && <option value="">Choose…</option>}
+                {me.profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
-              {profile?.is_fictional && <div className="fic">Fictional test profile.</div>}
-            </div>
-          )}
+            </> : <><div className="ws-label">Supplier</div><div className="ws-name">{profile?.name}</div></>}
+            {profile?.is_fictional && <div className="fic">Fictional test profile.</div>}
+            <div className="ws-user"><span title={me.email}>{me.email}</span>{!STATIC && <button className="link-btn" onClick={signOut}>Sign out</button>}</div>
+          </div>
         </aside>
         <main className="main" id="main">
           {STATIC && <div className="banner info" role="note"><span className="b-icon">i</span><div className="body">
             <strong>Read-only demo</strong>
-            <p>Tender notices are real data from Find a Tender, captured {fmtDate(SNAPSHOT_META?.captured_at)}. The three companies and the two notices marked Demo are fictional, and the AI answers on those notices are scripted. Buttons that change data are switched off.</p>
+            <p>Captured {fmtDate(SNAPSHOT_META?.captured_at)}. The companies and notices marked Demo are fictional, and the AI answers on them are scripted. Buttons that change data are switched off.</p>
           </div></div>}
-          {failed ? <div className="empty" role="alert"><strong>TenderFit can't reach its server.</strong>It may be restarting. Reload in a moment; if this stays, check that the API is running.</div> :
-            !profile ? <div className="empty">{profiles.length === 0 && !failed ? "Loading…" : "No workspace found."}</div> : (
+          {!profile ? <div className="empty"><strong>Choose a supplier</strong>Pick one in the menu to continue.</div> : (
             <ErrorBoundary resetKey={location.pathname}><Routes>
               <Route path="/" element={<Navigate to="/opportunities" replace />} />
               <Route path="/opportunities" element={<Opportunities />} />

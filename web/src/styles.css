@@ -306,3 +306,21 @@ mark { background: #fbe9a9; color: inherit; padding: 0 1px; }
 
 .tabs { overflow-x: auto; }
 .tab { white-space: nowrap; }
+
+/* Sign-in and onboarding */
+.centered { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+.auth-card { width: min(400px, 100%); background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; box-shadow: var(--shadow); }
+.auth-card.wide { width: min(520px, 100%); }
+.auth-card h1 { font-size: 20px; margin: 4px 0 12px; }
+.brand.dark { color: var(--text); padding: 0 0 14px; }
+.btn.full { width: 100%; justify-content: center; }
+.link-btn { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; color: #c3c9d2; font-size: 12px; }
+.link-btn.dark { color: var(--navy); margin-top: 14px; font-size: 13px; }
+.ws-label { color: #9aa3af; margin-bottom: 4px; }
+.ws-name { color: #fff; font-weight: 500; }
+.ws-user { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; color: #9aa3af; }
+.ws-user span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field select { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.check-field { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; font-size: 13px; }
+.section-actions { display: flex; justify-content: flex-end; margin: 0 0 14px; }
+.fact-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }

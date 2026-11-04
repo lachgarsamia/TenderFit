@@ -71,10 +71,10 @@ export default function Assessment() {
 
   const load = useCallback(async () => {
     try {
-      setInv(await api(`/lots/${lotId}/documents?profile_id=${profile!.id}`));
+      setInv(await api(`/lots/${lotId}/documents`));
     } catch (e: any) { setError(e.message); }
     try {
-      const d = await api(`/lots/${lotId}/assessment?profile_id=${profile!.id}`);
+      const d = await api(`/lots/${lotId}/assessment`);
       setA(d); setError(null);
       setSel((s) => (s && d.requirements.some((r: any) => r.id === s) ? s :
         d.requirements.find((r: any) => status(r) !== "met")?.id ?? d.requirements[0]?.id ?? null));
@@ -110,15 +110,15 @@ export default function Assessment() {
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
   const confirm = (point: string, target_id: number, decision: string, done: string, extra: any = {}) =>
-    act(done, () => post("/confirmations", { point, target_id, decision, user: "you", profile_id: profile!.id, ...extra }));
+    act(done, () => post("/confirmations", { point, target_id, decision, ...extra }));
   const upload = (refId: number | null) => { setUploadRef(refId); fileRef.current?.click(); };
   const onFile = (f?: File) => {
     if (!f) return;
-    const fd = new FormData(); fd.append("file", f); fd.append("user", "you"); fd.append("profile_id", String(profile!.id));
+    const fd = new FormData(); fd.append("file", f);
     if (uploadRef) fd.append("ref_id", String(uploadRef));
     act("Document added, privately to your workspace.", () => api(`/lots/${lotId}/documents`, { method: "POST", body: fd }));
   };
-  const assess = () => act("Assessment started.", () => post(`/lots/${lotId}/assess`, { profile_id: profile!.id }));
+  const assess = () => act("Assessment started.", () => post(`/lots/${lotId}/assess`, {}));
 
   const hasResult = !!a?.assessment_id;
   const docs = inv?.documents ?? [];
@@ -181,7 +181,8 @@ export default function Assessment() {
           <span className="b-icon">!</span>
           <div className="body">
             <strong>{hasResult ? "Provisional: " : ""}{essential.length - unread.length} of {essential.length} essential documents read</strong>
-            <p>{unread.map((d: any) => d.label).join(", ")} could not be read, so no blocker is claimed for {unread.length === 1 ? "it" : "them"}. Upload it from the buyer's portal (it stays private to you), or confirm the buyer issued none.</p>
+            <p>{unread.map((d: any) => d.label).join(", ")} could not be read in full, so no blocker is claimed for {unread.length === 1 ? "it" : "them"}. Upload {unread.length === 1 ? "it" : "them"} from the buyer's portal (private to you), or confirm the buyer issued none.</p>
+            {unread.filter((d: any) => d.ocr_pages?.length).map((d: any) => <p key={d.id}><strong>{d.label}:</strong> {d.note}</p>)}
           </div>
           <button className="btn" onClick={() => setTab("docs")}>View documents</button>
           <button className="btn primary" disabled={busy} onClick={() => upload(unread[0]?.id)}>Upload</button>
@@ -236,7 +237,7 @@ export default function Assessment() {
             </div>
             <div className="sticky evidence-pane">
               {!r ? <Empty>Select a requirement to see its evidence.</Empty> : <Evidence r={r} busy={busy} answer={answer} setAnswer={setAnswer} reason={reason} setReason={setReason} onSource={setSource}
-                onAnswer={() => act("Answer saved. Re-checking.", () => post(`/questions/${r.question_id}/answer`, { answer, user: "you", profile_id: profile!.id }))}
+                onAnswer={() => act("Answer saved. Re-checking.", () => post(`/questions/${r.question_id}/answer`, { answer }))}
                 onConfirm={(point, decision, done, extra) => confirm(point, r.id, decision, done, extra)} />}
             </div>
           </div>
@@ -256,7 +257,8 @@ export default function Assessment() {
                       d.origin === "upload" ? "Uploaded by you (private)" : d.status === "read" ? "Public download" : d.url ? "Buyer portal (registration needed)" : "Listed without a link"}</td>
                     <td>{d.status === "read" ? <Tag tone="ok">✓ Read · {d.passages} passages</Tag> :
                       d.status === "confirmed_none" ? <Tag tone="muted">Buyer issued none</Tag> :
-                      d.status === "unreadable" ? <Tag tone="bad">✕ Unreadable</Tag> :
+                      d.status === "partial" ? <><Tag tone="warn">Partly read · {d.passages} passages</Tag><div className="small muted" style={{ marginTop: 4 }}>{d.note}</div></> :
+                      d.status === "unreadable" ? <><Tag tone="bad">✕ Unreadable</Tag>{d.note && <div className="small muted" style={{ marginTop: 4 }}>{d.note}</div>}</> :
                       blocking ? <Tag tone="bad">✕ Not read · blocks a final verdict</Tag> : <Tag tone="muted">Not needed for the check</Tag>}</td>
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{blocking && <>
                       <button className="btn ghost sm" disabled={busy} onClick={() => confirm("G7", d.id, "none_issued", "Recorded for your workspace: the buyer issued none.")}>Buyer issued none</button>
@@ -274,7 +276,7 @@ export default function Assessment() {
           </details>}
         </>)}
       </Card>}
-      {source && <SourceDialog source={source} profileId={profile!.id} onClose={() => setSource(null)} />}
+      {source && <SourceDialog source={source} onClose={() => setSource(null)} />}
       <Toast message={toast} busy={false} onDone={() => setToast(null)} />
     </>
   );

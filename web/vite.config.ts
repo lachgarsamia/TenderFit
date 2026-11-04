@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -7,4 +8,5 @@ export default defineConfig({
     port: 5173,
     proxy: { "/api": { target: process.env.API_URL ?? "http://localhost:8000", rewrite: (p) => p.replace(/^\/api/, "") } },
   },
+  test: { environment: "jsdom", globals: true, restoreMocks: true },
 });

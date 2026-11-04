@@ -28,7 +28,7 @@ export default function Changes() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() => api<any[]>(`/changes?profile_id=${profile!.id}`).then((e) => {
+  const load = useCallback(() => api<any[]>("/changes").then((e) => {
     setEvents(e); setError(null);
     setSel((s) => (s && e.some((x) => x.id === s) ? s : e.find((x) => x.kind !== "status")?.id ?? e[0]?.id ?? null));
   }).catch((e) => setError(e.message)), [profile?.id]);

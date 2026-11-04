@@ -15,14 +15,14 @@ function Highlighted({ text, quote }: { text: string; quote?: string }) {
 }
 
 /** Read a cited passage in its context, in any format, with a link to the file at the page where one exists. */
-export function SourceDialog({ source, profileId, onClose }: { source: SourceRef; profileId: number; onClose: () => void }) {
+export function SourceDialog({ source, onClose }: { source: SourceRef; onClose: () => void }) {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     ref.current?.showModal();
-    api(`/passages/${source.passage_id}?profile_id=${profileId}`).then(setData).catch((e) => setError(e.message));
-  }, [source.passage_id, profileId]);
+    api(`/passages/${source.passage_id}`).then(setData).catch((e) => setError(e.message));
+  }, [source.passage_id]);
   const current = data?.passages.find((p: any) => p.id === source.passage_id);
   const page = current?.page ?? source.page;
   return (
@@ -47,7 +47,7 @@ export function SourceDialog({ source, profileId, onClose }: { source: SourceRef
       {data && <footer className="dialog-foot">
         {data.document.origin === "upload" && <Tag>Private to your workspace</Tag>}
         {data.document.has_file ? (
-          <a className="btn" href={`${fileUrl(data.document.id, profileId)}${page ? `#page=${page}` : ""}`} target="_blank" rel="noreferrer">Open the file{page ? ` at page ${page}` : ""}</a>
+          <a className="btn" href={`${fileUrl(data.document.id)}${page ? `#page=${page}` : ""}`} target="_blank" rel="noreferrer">Open the file{page ? ` at page ${page}` : ""}</a>
         ) : <span className="small muted">Taken from the notice's own fields; there is no separate file.</span>}
       </footer>}
     </dialog>
