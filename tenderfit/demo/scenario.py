@@ -32,9 +32,14 @@ def spec_pages(delivery_days: int = 30) -> dict[int, list[tuple[str, str]]]:
     }
 
 
-def spec_pdf(delivery_days: int = 30, edit=None) -> bytes:
+def spec_pdf(delivery_days: int = 30, edit=None, *, linked_timetable: str | None = None) -> bytes:
     """edit rewrites the page text, for controlled amendment experiments."""
     pages = spec_pages(delivery_days)
+    if linked_timetable:
+        pages[7] = [("Appendix B Definitions", "Working Days means the permitted timetable specified in Schedule C. "
+                     "The timetable governs the installation obligations in this procurement."),
+                    ("Schedule C Timetable", f"Working Days means {linked_timetable} excluding public holidays. "
+                     "The contracting authority must authorise access outside these hours.")]
     if edit:
         pages = {n: [(h, edit(b)) for h, b in items] for n, items in pages.items()}
     doc = pymupdf.open()
