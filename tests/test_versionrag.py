@@ -22,6 +22,10 @@ ARMS = [BASELINES["B1"], PipelineConfig("one-hop"), BASELINES["VersionRAG"]]
 
 @pytest.mark.parametrize("cfg", ARMS, ids=lambda cfg: cfg.name)
 def test_two_hop_amendment(db, tmp_path, monkeypatch, cfg):
+    timetable_trial(db, tmp_path, monkeypatch, cfg)
+
+
+def timetable_trial(db, tmp_path, monkeypatch, cfg):
     monkeypatch.setattr(settings, "document_dir", str(tmp_path))
     monkeypatch.setattr(settings, "demo_scripted_llm", True)
     today = date(2026, 11, 11)
@@ -49,7 +53,7 @@ def test_two_hop_amendment(db, tmp_path, monkeypatch, cfg):
         retrieved += len(unique)
         relevant_hits += sum(s in relevant for s in unique.values())
         states.append(row["status"])
-        if cfg.versionrag:
+        if cfg.name == "VersionRAG":
             assert relevant <= sections
             assert any(len(r.get("path", [])) == 3 for r in row["retrieval"])
             if run != aid:
@@ -60,14 +64,14 @@ def test_two_hop_amendment(db, tmp_path, monkeypatch, cfg):
     print("SYNTHETIC metrics", cfg.name, dict(dependency_hits=relevant_hits, dependency_gold=4, retrieved=retrieved,
           correct=sum(a == b for a, b in zip(states, ["met", "needs_confirmation"])), false_met=states[1] == "met",
           reopened=len(reopened), useful=len(expected_changes & reopened), changed_gold=len(expected_changes)))
-    if cfg.versionrag:
+    if cfg.name == "VersionRAG":
         assert states == ["met", "needs_confirmation"]
         assert impact["mode"] == "targeted"
     shadow = assess_lot(db, lot, pid, DemoLLM(), http=changed, shadow=True, **kw)
     def statuses(run):
         return {r["requirement_id"]: r["status"] for r in db.execute("SELECT requirement_id,status FROM verdict WHERE assessment_id=%s", (run,))}
     print(cfg.name, "complete-set agreement", statuses(shadow) == statuses(impact["after_assessment_id"]))
-    if cfg.versionrag:
+    if cfg.name == "VersionRAG":
         assert statuses(shadow) == statuses(impact["after_assessment_id"])
 
 
@@ -98,5 +102,3 @@ def test_paths_filter_supplier_and_report_ambiguous_evidence(db):
     ambiguous = versioned.resolve(db, vid, source, {"Appendix B"}, other)
     assert ambiguous.gaps == ["schedule c (ambiguous)"]
     assert versioned.resolve(db, vid + 1000, source, {"Appendix B"}, other).links == []
-
-
