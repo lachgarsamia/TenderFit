@@ -1,0 +1,282 @@
+[
+  {
+    "original": "027655-2023",
+    "amendment": "029049-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-10-27",
+    "new": "2023-11-10",
+    "supplier_ready": "2023-10-28",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "026537-2023",
+    "amendment": "029056-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-10-05",
+    "new": "2023-10-11",
+    "supplier_ready": "2023-10-06",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "026560-2023",
+    "amendment": "029161-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-10-18",
+    "new": "2023-10-23",
+    "supplier_ready": "2023-10-19",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "029159-2023",
+    "amendment": "029197-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-11-03",
+    "new": "2023-11-06",
+    "supplier_ready": "2023-11-04",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "028120-2023",
+    "amendment": "029198-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-10-25",
+    "new": "2023-11-08",
+    "supplier_ready": "2023-10-26",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "026000-2023",
+    "amendment": "029214-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-10-04",
+    "new": "2023-10-13",
+    "supplier_ready": "2023-10-05",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "027263-2023",
+    "amendment": "029261-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-10-23",
+    "new": "2023-11-14",
+    "supplier_ready": "2023-10-24",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "021384-2023",
+    "amendment": "029508-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-08-25",
+    "new": "2023-11-10",
+    "supplier_ready": "2023-08-26",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "029642-2023",
+    "amendment": "029646-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-11-17",
+    "new": "2023-11-20",
+    "supplier_ready": "2023-11-18",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "026847-2023",
+    "amendment": "029665-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-12-04",
+    "new": "2023-10-30",
+    "supplier_ready": "2023-10-31",
+    "local_time": "12:00",
+    "expected": [
+      "met",
+      "not_met"
+    ]
+  },
+  {
+    "original": "026382-2023",
+    "amendment": "029938-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-10-13",
+    "new": "2023-10-27",
+    "supplier_ready": "2023-10-14",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "026609-2023",
+    "amendment": "030040-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-10-13",
+    "new": "2023-10-17",
+    "supplier_ready": "2023-10-14",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "027235-2023",
+    "amendment": "030095-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-10-17",
+    "new": "2023-10-24",
+    "supplier_ready": "2023-10-18",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "026835-2023",
+    "amendment": "030137-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-10-08",
+    "new": "2023-10-15",
+    "supplier_ready": "2023-10-09",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "027979-2023",
+    "amendment": "030154-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-10-23",
+    "new": "2023-10-30",
+    "supplier_ready": "2023-10-24",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "029731-2023",
+    "amendment": "030252-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-11-08",
+    "new": "2023-10-23",
+    "supplier_ready": "2023-10-24",
+    "local_time": "12:00",
+    "expected": [
+      "met",
+      "not_met"
+    ]
+  },
+  {
+    "original": "028282-2023",
+    "amendment": "030358-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-10-26",
+    "new": "2023-11-09",
+    "supplier_ready": "2023-10-27",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "029613-2023",
+    "amendment": "030561-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-11-06",
+    "new": "2023-11-20",
+    "supplier_ready": "2023-11-07",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  },
+  {
+    "original": "031292-2023",
+    "amendment": "031307-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-11-24",
+    "new": "2023-11-23",
+    "supplier_ready": "2023-11-24",
+    "local_time": "00:00",
+    "expected": [
+      "met",
+      "not_met"
+    ]
+  },
+  {
+    "original": "030166-2023",
+    "amendment": "031747-2023",
+    "requirement": "Submission by the effective closing date",
+    "dependency": "Original PROCEDURE/DATE_RECEIPT_TENDERS replaced by F14 CHANGES/CHANGE at IV.2.2",
+    "old": "2023-11-15",
+    "new": "2023-11-22",
+    "supplier_ready": "2023-11-16",
+    "local_time": "12:00",
+    "expected": [
+      "not_met",
+      "met"
+    ]
+  }
+]
