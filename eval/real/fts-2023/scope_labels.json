@@ -1,0 +1,25 @@
+[
+  {
+    "original": "029516-2023", "amendment": "029733-2023", "section": "II.2",
+    "requirement": "Serve HMC-certified meat", "dependency": "Catering description, OLD_VALUE and NEW_VALUE, HMC UK certification paragraph",
+    "change": "The buyer adds Al-Furqan Primary School and reiterates the HMC rule. Certification already appeared in the earlier description.",
+    "supplier": "Has current HMC certification for all meat it would provide to either site.",
+    "expected": ["met", "met"], "scope": "Certification only. Whether one supplier could service both schools is a separate question."
+  },
+  {
+    "original": "026166-2023", "amendment": "029575-2023", "section": "II.2.4",
+    "requirement": "Submit through the Defence Sourcing Portal in accordance with DEFFORM 47",
+    "dependency": "Notice description points to DEFFORM 47. The F14 OLD_VALUE and NEW_VALUE give different closing dates.",
+    "change": "Deadline moves from 10 October to 31 October 2023 at 10am.",
+    "supplier": "Ready on 20 October 2023 and able to submit via the portal.",
+    "expected": ["not_met", "met"], "scope": "Timing and channel only. The procurement pack is needed to assess other instructions."
+  },
+  {
+    "original": "029555-2023", "amendment": "029689-2023", "section": "II.2.6", "lot": "2",
+    "requirement": "No supplier eligibility threshold is stated by this estimated lot value.",
+    "dependency": "F14 WHERE LOT_NO 2 and II.2.6",
+    "change": "Estimated value excluding VAT falls from GBP 3.4bn to GBP 250m for lot 2.",
+    "supplier": "No financial standing evidence provided.",
+    "expected": ["no_requirement", "no_requirement"], "scope": "Negative control against converting the buyer's estimated value into a minimum supplier turnover."
+  }
+]

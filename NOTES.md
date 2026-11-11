@@ -52,6 +52,15 @@
 - Requirements are extracted per document (`document.extracted_at`), so a document uploaded after a first
   assessment is extracted on the next run.
 
+## Decisions in the reliability and intelligence iteration
+- A run no longer supersedes anything until it finishes; superseding and completion share one transaction.
+- A contract list is not exhaustive, so a profile with no qualifying contract gives NEEDS CONFIRMATION, not NOT MET. This reverses the
+  earlier behaviour (a test asserted NOT MET) and follows the rule that missing evidence is never NOT MET.
+- Graph edges exist only where text creates them, and expansion follows only links the requirement names, in one hop. No graph database.
+- Uploads through the API are private to the supplier. `attach_upload` with no profile still adds to the public pack, for datasets and operators.
+- Experiment arms were renamed to B0-B5. B0 is today's code with rules and guard off, not the historical system.
+- Scripted demo answers live in `tenderfit/demo` behind `DEMO_SCRIPTED_LLM`, so they are never used unless asked for.
+
 ## Live API findings (probed 2026-10-29, window 2026-10-27)
 - No key, no auth. ~0.5s per 100-release page, but sustained paging gets throttled: 2-3 responses of 429/503 per
   56 pages in the two-week import, all recovered via Retry-After. A two-week backfill takes 4-7 minutes.

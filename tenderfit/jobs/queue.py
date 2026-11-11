@@ -1,22 +1,35 @@
 from datetime import datetime, timedelta, timezone
 
-import psycopg
 from psycopg.types.json import Jsonb
+
+from tenderfit.db import Conn, must
 
 STALE_AFTER = timedelta(hours=1)
 
 
-def enqueue(conn: psycopg.Connection, kind: str, payload: dict | None = None, lock_key: str | None = None,
+def enqueue(conn: Conn, kind: str, payload: dict | None = None, lock_key: str | None = None,
             run_after: datetime | None = None) -> int:
-    return conn.execute(
+    return must(conn.execute(
         "INSERT INTO job (kind, payload, lock_key, run_after) VALUES (%s, %s, %s, coalesce(%s, now())) RETURNING id",
         (kind, Jsonb(payload or {}), lock_key, run_after),
-    ).fetchone()["id"]
+    ).fetchone())["id"]
 
 
-def claim(conn: psycopg.Connection) -> dict | None:
+def enqueue_unique(conn: Conn, kind: str, payload: dict, keys: tuple[str, ...], lock_key: str | None = None) -> int:
+    """Reuse a job that is still waiting for the same target. A running job is not reused: it may predate this change."""
+    match = {k: payload[k] for k in keys}
+    existing = conn.execute("SELECT id FROM job WHERE kind = %s AND status = 'queued' AND payload @> %s ORDER BY id LIMIT 1",
+                            (kind, Jsonb(match))).fetchone()
+    return existing["id"] if existing else enqueue(conn, kind, payload, lock_key)
+
+
+def claim(conn: Conn) -> dict | None:
+    # A job whose worker died is retried only while it has attempts left; otherwise it is closed as failed.
     conn.execute(
-        "UPDATE job SET status = 'queued', locked_at = NULL WHERE status = 'running' AND locked_at < now() - %s",
+        """UPDATE job SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END, locked_at = NULL,
+                  last_error = coalesce(last_error, 'worker stopped while running this job'),
+                  finished_at = CASE WHEN attempts >= max_attempts THEN now() END
+           WHERE status = 'running' AND locked_at < now() - %s""",
         (STALE_AFTER,),
     )
     job = conn.execute(
@@ -32,12 +45,12 @@ def claim(conn: psycopg.Connection) -> dict | None:
     return job
 
 
-def complete(conn: psycopg.Connection, job_id: int) -> None:
+def complete(conn: Conn, job_id: int) -> None:
     conn.execute("UPDATE job SET status = 'done', finished_at = now(), last_error = NULL WHERE id = %s", (job_id,))
     conn.commit()
 
 
-def fail(conn: psycopg.Connection, job: dict, error: str) -> None:
+def fail(conn: Conn, job: dict, error: str) -> None:
     final = job["attempts"] >= job["max_attempts"]
     backoff = timedelta(seconds=min(30 * 2 ** job["attempts"], 3600))
     conn.execute(
@@ -48,6 +61,6 @@ def fail(conn: psycopg.Connection, job: dict, error: str) -> None:
     conn.commit()
 
 
-def pending(conn: psycopg.Connection, kind: str) -> bool:
+def pending(conn: Conn, kind: str) -> bool:
     return conn.execute("SELECT 1 FROM job WHERE kind = %s AND status IN ('queued', 'running') LIMIT 1",
                         (kind,)).fetchone() is not None

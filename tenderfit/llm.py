@@ -19,6 +19,10 @@ class LLMError(Exception):
     pass
 
 
+class OutputTooLong(LLMError):
+    """The response hit max_tokens. A smaller request can succeed."""
+
+
 @dataclass
 class Usage:
     model: str
@@ -90,7 +94,8 @@ class AnthropicLLM:
         if self._client is None:
             if not settings.anthropic_api_key:
                 raise LLMError("ANTHROPIC_API_KEY is not set (add it to .env)")
-            self._client = self.anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=4)
+            self._client = self.anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=4,
+                                                   timeout=settings.llm_timeout_s)
         return self._client
 
     def _create(self, **kw):
@@ -107,7 +112,7 @@ class AnthropicLLM:
         if r.stop_reason == "refusal":
             raise LLMError("model declined the request")
         if r.stop_reason == "max_tokens":
-            raise LLMError("model output hit max_tokens")
+            raise OutputTooLong("model output hit max_tokens")
         return r, usage
 
     def json(self, role: str, system: str, user: str, schema: dict) -> JsonResult:
@@ -115,8 +120,13 @@ class AnthropicLLM:
             model=_model(role), max_tokens=16000, system=system, output_config={
                 "effort": settings.llm_effort, "format": {"type": "json_schema", "schema": schema}},
             messages=[{"role": "user", "content": user}])
-        text = next(b.text for b in r.content if b.type == "text")
-        return JsonResult(json.loads(text), usage)
+        text = next((b.text for b in r.content if b.type == "text"), None)
+        if text is None:
+            raise LLMError("model returned no text block")
+        try:
+            return JsonResult(json.loads(text), usage)
+        except json.JSONDecodeError as e:
+            raise LLMError(f"model returned invalid JSON: {e}") from e
 
     def tool_turn(self, role: str, system: str, messages: list[dict], tools: list[dict]) -> ToolTurn:
         r, usage = self._create(model=_model(role), max_tokens=16000, system=system, messages=messages,
@@ -175,6 +185,9 @@ class RecordedLLM:
 
 
 def default_llm() -> LLM:
+    if settings.demo_scripted_llm:
+        from tenderfit.demo.llm import DemoLLM
+        return DemoLLM()
     llm: LLM = AnthropicLLM()
     if settings.llm_record_path:
         return RecordedLLM(Path(settings.llm_record_path), live=llm)

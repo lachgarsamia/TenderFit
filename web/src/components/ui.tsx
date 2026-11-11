@@ -38,6 +38,20 @@ export const VerdictPill = ({ status }: { status: string }) => <Pill s={VERDICT[
 export const EvidencePill = ({ status, children }: { status: string; children?: ReactNode }) =>
   <Pill s={EVIDENCE[status] ?? { icon: "·", label: status, tone: "muted" }}>{children}</Pill>;
 export const FitPill = ({ kind, children }: { kind: string; children?: ReactNode }) => <Pill s={FIT[kind] ?? FIT.unassessed}>{children}</Pill>;
+const DECIDER: Record<string, [string, string]> = {
+  rule: ["Fixed rule", "Compared by a deterministic rule. No AI judgement was involved."],
+  model: ["AI reading, checked", "An AI model read the text. Its answer passed the citation and evidence checks."],
+  agent: ["AI investigation, checked", "An AI agent followed references with read-only tools. Its answer passed the same checks."],
+  guard: ["Lowered by a safeguard", "An AI model proposed a stronger answer, but the checks did not support it, so it was lowered."],
+  budget: ["Not examined", "The cost limit for this lot was reached first. Nothing was guessed."],
+};
+const QUALITY: Record<string, [string, string]> = {
+  strong: ["Strong evidence", "ok"], weak: ["Weak evidence", "warn"], contradictory: ["Contradicted", "bad"],
+  missing: ["No evidence", "outline"], ambiguous: ["Unresolved", "warn"],
+};
+export const DeciderTag = ({ by }: { by: string }) => { const d = DECIDER[by] ?? [by, ""]; return <span className="pill outline sm" title={d[1]}>{d[0]}</span>; };
+export const deciderExplain = (by: string) => DECIDER[by]?.[1] ?? "";
+export const QualityTag = ({ q }: { q?: string }) => { if (!q || !QUALITY[q]) return null; return <span className={`pill ${QUALITY[q][1]} sm`}>{QUALITY[q][0]}</span>; };
 export const Tag = ({ tone = "muted", children }: { tone?: string; children: ReactNode }) => <span className={`pill ${tone} sm`}>{children}</span>;
 export const Fictional = ({ children = "Demo data" }: { children?: ReactNode }) => <span className="pill fiction sm">{children}</span>;
 
@@ -114,9 +128,11 @@ export function human(text?: string | null): string {
   if (!text) return "";
   if (/ANTHROPIC_API_KEY|model unavailable|agent unavailable/i.test(text))
     return "Not checked yet: the AI service is not connected. Nothing was guessed.";
+  if (/overloaded|provider error|provider unreachable/i.test(text)) return "The AI service was unavailable, so this could not finish. TenderFit will try again.";
   if (/budget reached/i.test(text)) return "Checking stopped at the cost limit for this lot. Nothing was guessed.";
   return text
     .replace(/\s*\[downgraded:[^\]]*\]/g, "")
+    .replace(/^[A-Za-z]*Error: /, "")
     .replace(/\[on declared facts; proof required\]/g, "(declared only; proof is required)")
     .replace(/HTTP 5\d\d/g, "The server had a problem. Please try again.");
 }

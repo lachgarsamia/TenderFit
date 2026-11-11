@@ -2,11 +2,11 @@ import json
 import time
 from dataclasses import dataclass, field
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from tenderfit.config import settings
-from tenderfit.llm import LLM, LLMError, UNTRUSTED_RULE, log_call, untrusted
+from tenderfit.db import Conn, must
+from tenderfit.llm import LLM, UNTRUSTED_RULE, LLMError, log_call, untrusted
 from tenderfit.profile.validity import check
 from tenderfit.retrieval.search import Embedder, Reranker, search
 from tenderfit.rules.engine import NEEDS, UNKNOWN, Condition, Context, Fact, evaluate
@@ -61,6 +61,9 @@ TOOLS = [
                                             "attribute filters (capacity, experience, certificate, test_report, insurance, "
                                             "region, product, service, registration) or null for all.",
      "input_schema": _obj({"attribute": NULLABLE_STR})},
+    {"name": "check_evidence", "description": "See what automatic checks found in the files behind one profile fact: supplier name, "
+                                              "standard or policy type, amount, expiry, and what could not be checked.",
+     "input_schema": _obj({"fact_id": {"type": "integer"}})},
     {"name": "compare", "description": "Run a deterministic rule-engine check against the profile.",
      "input_schema": _obj({"kind": {"type": "string", "enum": ["at_least", "at_most", "within_years", "region_covered",
                                                                 "has_evidence", "min_amount"]},
@@ -73,7 +76,7 @@ TOOLS = [
                            "supporting_fact_ids": {"type": "array", "items": {"type": "integer"}},
                            "contrary_fact_ids": {"type": "array", "items": {"type": "integer"}},
                            "citations": {"type": "array", "items": _obj({"passage_id": {"type": "integer"}, "quote": {"type": "string"}})},
-                           "question": NULLABLE_STR})},
+                           "question": NULLABLE_STR, "conflict": {"type": "boolean"}})},
     {"name": "raise_question", "description": "Finish when evidence is insufficient: record a targeted question for the user.",
      "input_schema": _obj({"status": {"type": "string", "enum": ["needs_confirmation", "unknown"]},
                            "reason": {"type": "string"}, "question": {"type": "string"}})},
@@ -85,8 +88,9 @@ pipeline could not settle it. Decide where to look for evidence and when it is s
 {UNTRUSTED_RULE}
 
 Follow cross-references ("see Appendix C", "as set out in Section 5") with read_section or open_attachment, check
-clarifications when the text accepts an equivalent or is ambiguous, read the profile, and use compare for any
-machine-checkable condition. Never assume certificates, experience, prices or commitments that are not in the profile.
+clarifications when the text accepts an equivalent or is ambiguous, read the profile, use check_evidence before relying on a
+document-backed fact, and use compare for any machine-checkable condition. A rule result binds you: do not contradict it.
+If passages disagree, set conflict. Never assume certificates, experience, prices or commitments that are not in the profile.
 Missing evidence is never not_met. You may only cite passages a tool returned, with exact quotes. Finish with
 record_verdict, or raise_question when the evidence is not there. You have at most {settings.agent_max_tool_calls} tool calls."""
 
@@ -97,10 +101,12 @@ def _passage_out(p: dict) -> dict:
 
 
 class Tools:
-    def __init__(self, conn: psycopg.Connection, version_id: int, facts: list[Fact], ctx: Context,
-                 emb: Embedder | None, rr: Reranker | None):
+    def __init__(self, conn: Conn, version_id: int, facts: list[Fact], ctx: Context,
+                 emb: Embedder | None, rr: Reranker | None, profile_id: int | None = None):
         self.conn, self.version_id, self.facts, self.ctx, self.emb, self.rr = conn, version_id, facts, ctx, emb, rr
+        self.profile_id = profile_id
         self.seen: dict[int, dict] = {}
+        self.requirement: str | None = None
         self.read_docs: set[int] = set()
 
     def _rows(self, sql: str, args: tuple) -> list[dict]:
@@ -110,37 +116,44 @@ class Tools:
         return rows
 
     def search_passages(self, query: str) -> dict:
-        hits = search(self.conn, self.version_id, query, k=5, emb=self.emb, rr=self.rr)
+        hits = search(self.conn, self.version_id, query, k=5, emb=self.emb, rr=self.rr, profile_id=self.profile_id)
         for h in hits:
             self.seen[h.id] = {"id": h.id, "text": h.text, "section": h.section, "page": h.page, "document": h.document}
         return {"passages": [_passage_out(self.seen[h.id]) for h in hits]}
 
     def read_section(self, passage_id: int | None = None, label: str | None = None) -> dict:
         base = """SELECT p.id, p.text, p.section, p.page, p.ordinal, p.document_id, coalesce(d.filename, 'document') document
-                  FROM passage p JOIN document d ON d.id = p.document_id WHERE d.version_id = %s"""
+                  FROM passage p JOIN document d ON d.id = p.document_id
+                  WHERE d.version_id = %s AND (d.owner_profile_id IS NULL OR d.owner_profile_id = %s)"""
+        scope = (self.version_id, self.profile_id)
         if passage_id is not None:
-            anchor = self.conn.execute(base + " AND p.id = %s", (self.version_id, passage_id)).fetchone()
+            anchor = self.conn.execute(base + " AND p.id = %s", (*scope, passage_id)).fetchone()
             if not anchor:
                 return {"error": "passage not in this notice version"}
             rows = self._rows(base + """ AND p.document_id = %s AND (p.section IS NOT DISTINCT FROM %s
                                          OR abs(p.ordinal - %s) <= 1) ORDER BY p.ordinal LIMIT 8""",
-                              (self.version_id, anchor["document_id"], anchor["section"], anchor["ordinal"]))
+                              (*scope, anchor["document_id"], anchor["section"], anchor["ordinal"]))
         elif label:
             rows = self._rows(base + " AND lower(p.section) LIKE %s ORDER BY p.document_id, p.ordinal LIMIT 8",
-                              (self.version_id, label.lower().strip() + "%"))
+                              (*scope, label.lower().strip() + "%"))
         else:
             return {"error": "give passage_id or label"}
         return {"passages": [_passage_out(r) for r in rows]} if rows else {"error": f"no section found for {label or passage_id}"}
 
     def open_attachment(self, label: str) -> dict:
         ref = self.conn.execute(
-            """SELECT r.*, d.filename FROM document_ref r LEFT JOIN document d ON d.id = r.document_id
-               WHERE r.version_id = %s AND (lower(r.label) LIKE %s OR lower(coalesce(d.filename, '')) LIKE %s)
-               ORDER BY r.status = 'read' DESC LIMIT 1""", (self.version_id, f"%{label.lower()}%", f"%{label.lower()}%")).fetchone()
+            """SELECT r.id, r.label, r.essential, coalesce(s.status, r.status) AS status, coalesce(s.note, r.note) AS note,
+                      coalesce(s.document_id, r.document_id) AS document_id, d.filename
+               FROM document_ref r LEFT JOIN document_ref_state s ON s.ref_id = r.id AND s.profile_id = %(p)s
+               LEFT JOIN document d ON d.id = coalesce(s.document_id, r.document_id)
+               WHERE r.version_id = %(v)s AND (r.owner_profile_id IS NULL OR r.owner_profile_id = %(p)s)
+                 AND (lower(r.label) LIKE %(l)s OR lower(coalesce(d.filename, '')) LIKE %(l)s)
+               ORDER BY coalesce(s.status, r.status) IN ('read', 'partial') DESC LIMIT 1""",
+            {"v": self.version_id, "p": self.profile_id, "l": f"%{label.lower()}%"}).fetchone()
         if not ref:
             return {"error": f"no document called {label} is listed or referenced in this notice"}
         self.read_docs.add(ref["id"])
-        if ref["status"] != "read":
+        if ref["status"] not in ("read", "partial"):
             return {"document": ref["label"], "status": ref["status"], "note": ref["note"],
                     "essential": ref["essential"], "readable": False}
         rows = self._rows("""SELECT p.id, p.text, p.section, p.page, coalesce(d.filename, 'document') document FROM passage p
@@ -152,15 +165,21 @@ class Tools:
         return {"document": ref["label"], "status": "read", "headings": headings[:30], "passages": [_passage_out(r) for r in rows]}
 
     def check_clarifications(self, query: str) -> dict:
-        docs = [r["document_id"] for r in self.conn.execute(
-            """SELECT document_id FROM document_ref WHERE version_id = %s AND status = 'read'
-               AND (ocds_type = 'clarifications' OR lower(label) LIKE '%%clarif%%')""", (self.version_id,))]
+        refs = self.conn.execute(
+            """SELECT r.id, coalesce(s.document_id, r.document_id) AS document_id FROM document_ref r
+               LEFT JOIN document_ref_state s ON s.ref_id = r.id AND s.profile_id = %(p)s
+               WHERE r.version_id = %(v)s AND coalesce(s.status, r.status) IN ('read', 'partial')
+                 AND (r.owner_profile_id IS NULL OR r.owner_profile_id = %(p)s)
+                 AND (r.ocds_type = 'clarifications' OR lower(r.label) LIKE '%%clarif%%')""",
+            {"v": self.version_id, "p": self.profile_id}).fetchall()
+        docs = [r["document_id"] for r in refs]
         if not docs:
             return {"clarifications": [], "note": "no clarification log has been published or uploaded for this notice"}
-        hits = [h for h in search(self.conn, self.version_id, query, k=10, emb=self.emb, rr=self.rr) if h.document_id in docs][:5]
+        hits = [h for h in search(self.conn, self.version_id, query, k=10, emb=self.emb, rr=self.rr, profile_id=self.profile_id)
+                if h.document_id in docs][:5]
         for h in hits:
             self.seen[h.id] = {"id": h.id, "text": h.text, "section": h.section, "page": h.page, "document": h.document}
-        self.read_docs |= set(docs)
+        self.read_docs |= {r["id"] for r in refs}
         return {"clarifications": [_passage_out(self.seen[h.id]) for h in hits]}
 
     def read_profile(self, attribute: str | None = None) -> dict:
@@ -174,22 +193,32 @@ class Tools:
                         "usable_at_deadline": v.usable, "validity_note": v.reason})
         return {"facts": out}
 
+    def check_evidence(self, fact_id: int) -> dict:
+        """What the automatic checks found in the files behind one of this supplier's own facts."""
+        if not any(f.id == fact_id for f in self.facts):
+            return {"error": "that fact is not in this supplier's profile"}
+        rows = self.conn.execute(
+            """SELECT v.level, v.checks, e.filename FROM fact_verification v JOIN evidence_file e ON e.id = v.evidence_file_id
+               WHERE v.fact_id = %s ORDER BY v.id DESC LIMIT 3""", (fact_id,)).fetchall()
+        return {"verifications": rows} if rows else {"verifications": [], "note": "no file has been checked for this fact"}
+
     def compare(self, **cond) -> dict:
         try:
-            r = evaluate(Condition(**cond), self.facts, self.ctx)
-        except Exception as e:
+            r = evaluate(Condition(**cond), self.facts, self.ctx, requirement=self.requirement)
+        except ValueError as e:
             return {"error": f"invalid condition: {e}"}
         return {"status": r.status, "reason": r.reason, "fact_ids": r.facts, "reads_fields": r.params}
 
 
-def run_agent(conn: psycopg.Connection, assessment_id: int, version_id: int, req: dict, facts: list[Fact], ctx: Context,
+def run_agent(conn: Conn, assessment_id: int, version_id: int, req: dict, facts: list[Fact], ctx: Context,
               llm: LLM, budget: Budget, b2_reason: str, escalated_because: list[str], emb: Embedder | None = None,
-              rr: Reranker | None = None):
+              rr: Reranker | None = None, profile_id: int | None = None):
     from tenderfit.assessment.pipeline import Decision, guard
 
-    tools = Tools(conn, version_id, facts, ctx, emb, rr)
-    src = conn.execute("""SELECT p.id, p.text, p.section, p.page, coalesce(d.filename, 'document') document FROM passage p
-                          JOIN document d ON d.id = p.document_id WHERE p.id = %s""", (req["passage_id"],)).fetchone()
+    tools = Tools(conn, version_id, facts, ctx, emb, rr, profile_id)
+    tools.requirement = f"{req['statement']} {req['quote']}"
+    src = must(conn.execute("""SELECT p.id, p.text, p.section, p.page, coalesce(d.filename, 'document') document FROM passage p
+                          JOIN document d ON d.id = p.document_id WHERE p.id = %s""", (req["passage_id"],)).fetchone())
     tools.seen[src["id"]] = dict(src)
     user = (f"Requirement ({req['obligation']}, {req['category']}): {req['statement']}\n"
             f"Equivalent allowed: {req['equivalent_allowed']}. Evidence the buyer asks for: {', '.join(req['evidence_needed']) or 'not stated'}.\n"
@@ -210,7 +239,7 @@ def run_agent(conn: psycopg.Connection, assessment_id: int, version_id: int, req
                             citations=[(req["passage_id"], req["quote"])], escalate=["model error"]), tools
         budget.spend(turn.usage.cost_usd, turn.usage.input_tokens + turn.usage.output_tokens)
         log_call(conn, "agent", AGENT_VERSION, turn.usage, {"version_id": version_id, "requirement_id": req["id"],
-                                                             "assessment_id": assessment_id})
+                                                             "assessment_id": assessment_id, "profile_id": profile_id})
         messages.append({"role": "assistant", "content": turn.raw_content})
         if not turn.calls:
             messages.append({"role": "user", "content": "Use a tool. Finish with record_verdict or raise_question."})
@@ -223,7 +252,7 @@ def run_agent(conn: psycopg.Connection, assessment_id: int, version_id: int, req
                 raw = dict(call.input)
                 if call.name == "raise_question":
                     raw.update(supporting_fact_ids=[], contrary_fact_ids=[], citations=[])
-                raw["conflict"] = False
+                raw["conflict"] = bool(raw.get("conflict"))
                 d = guard(raw, facts, ctx, req, tools.seen)
                 d.decided_by = "agent" if d.decided_by == "model" else d.decided_by
                 d.reads = list(tools.seen)

@@ -18,8 +18,8 @@ export default function Preparation() {
 
   useEffect(() => {
     setPlan(null); setError(null);
-    if (lotId) api(`/lots/${lotId}/preparation?profile_id=${profile!.id}`).then(setPlan).catch((e) => setError(e.message));
-    else api<any[]>(`/profiles/${profile!.id}/pursued`).then(setLots).catch((e) => setError(e.message));
+    if (lotId) api(`/lots/${lotId}/preparation`).then(setPlan).catch((e) => setError(e.message));
+    else api<any[]>("/profile/pursued").then(setLots).catch((e) => setError(e.message));
   }, [lotId, profile?.id]);
 
   if (!lotId) return (
@@ -80,7 +80,7 @@ export default function Preparation() {
               <div key={i}>
                 <div className="small muted">Draft from {c.source}. Review it, then send it through the buyer's portal.</div>
                 <div className="draft">{c.text}</div>
-                <button className="btn primary sm" onClick={() => { navigator.clipboard.writeText(c.text); setCopied(true); }}>{copied ? "✓ Copied" : "Copy question"}</button>
+                <button className="btn primary sm" onClick={() => { navigator.clipboard.writeText(c.text).then(() => setCopied(true)).catch(() => setError("Your browser did not allow copying. Select the text and copy it.")); }}>{copied ? "✓ Copied" : "Copy question"}</button>
               </div>
             ))}
           </Card>

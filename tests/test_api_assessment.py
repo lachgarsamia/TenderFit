@@ -1,11 +1,9 @@
-from fastapi.testclient import TestClient
-
-from tenderfit.api.main import app
 from tenderfit.assessment.pipeline import assess_lot
 from tenderfit.documents import service
 from tenderfit.ingest.importer import run_import
 from tenderfit.profile.seed import seed
 from tests import northfield
+from tests.conftest import as_supplier
 from tests.fakes import ScriptedLLM
 from tests.test_importer import NOW, T0, T1, fake
 from tests.test_pipeline import TODAY, portal, verdicts
@@ -16,13 +14,14 @@ def test_assessment_endpoint_and_confirmations(db, _test_db, tmp_path, monkeypat
     monkeypatch.setattr("tenderfit.config.settings.database_url", _test_db)
     monkeypatch.setattr(service.settings, "document_dir", str(tmp_path))
     atlas = seed(db)["Atlas Furniture"]
-    run_import(db, fake([northfield.release()]), T0, T1, now=NOW)
+    # A far-future deadline keeps the status assertion true whatever day the test runs.
+    run_import(db, fake([northfield.release(deadline="2099-12-31T12:00:00Z")]), T0, T1, now=NOW)
     lot1 = db.execute("SELECT id FROM lot WHERE lot_no = '1'").fetchone()["id"]
     kw = dict(llm=ScriptedLLM(verdicts), today=TODAY, emb=BagEmbedder(), rr=OverlapReranker())
     assess_lot(db, lot1, atlas, http=portal(northfield.pdf(northfield.SPEC_V1)), **kw)
 
-    with TestClient(app) as c:
-        a = c.get(f"/lots/{lot1}/assessment", params={"profile_id": atlas}).json()
+    with as_supplier(db, atlas) as c:
+        a = c.get(f"/lots/{lot1}/assessment").json()
         assert a["recommendation"].startswith("Blocker found")
         assert a["status"]["status"] in ("open", "unverified") and a["on_current_version"]
         delivery = next(r for r in a["requirements"] if r["statement"].startswith("Deliver all desks"))
@@ -42,11 +41,11 @@ def test_assessment_endpoint_and_confirmations(db, _test_db, tmp_path, monkeypat
                                               "profile_id": atlas}).status_code == 200
 
     assess_lot(db, lot1, atlas, **kw)
-    with TestClient(app) as c:
-        a = c.get(f"/lots/{lot1}/assessment", params={"profile_id": atlas}).json()
+    with as_supplier(db, atlas) as c:
+        a = c.get(f"/lots/{lot1}/assessment").json()
         delivery = next(r for r in a["requirements"] if r["statement"].startswith("Deliver all desks"))
         assert delivery["status"] == "not_met" and delivery["override_status"] == "needs_confirmation"
-        assert delivery["override_by"] == "sam"
+        assert delivery["override_by"] == "user%d@test.example" % atlas
         assert not a["recommendation"].startswith("Blocker found")
         assert a["decision"]["decision"] == "pursue"
         points = [r["point"] for r in db.execute("SELECT point FROM confirmation ORDER BY id")]

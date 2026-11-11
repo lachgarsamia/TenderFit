@@ -1,12 +1,16 @@
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, Query
+from fastapi import APIRouter, Depends, FastAPI, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from tenderfit.config import settings
 from tenderfit.db import connect, migrate
 from tenderfit.ingest import status as st
+
+log = logging.getLogger("tenderfit.api")
 
 
 @asynccontextmanager
@@ -16,13 +20,23 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="TenderFit", lifespan=lifespan)
+app = FastAPI(title="TenderFit", version="1.0", lifespan=lifespan, description=(
+    "Sign in through /v1/auth/login. Which supplier a request acts for comes from the session. "
+    "Requests that change anything need the header X-TenderFit: 1."))
 
+from tenderfit.api.accounts import router as accounts_router  # noqa: E402
 from tenderfit.api.assessments import router  # noqa: E402
+from tenderfit.api.deps import check_csrf, current_profile  # noqa: E402
 from tenderfit.api.screens import router as screens_router  # noqa: E402
 
-app.include_router(router)
-app.include_router(screens_router)
+
+@app.exception_handler(Exception)
+def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+    log.exception("%s %s failed", request.method, request.url.path, exc_info=exc)
+    return JSONResponse({"detail": "TenderFit hit an unexpected error. The details are in the server log."}, status_code=500)
+
+
+v1 = APIRouter(prefix="/v1", dependencies=[Depends(check_csrf)])
 
 
 class LotOut(BaseModel):
@@ -59,17 +73,26 @@ def effective_status(stored: str, reason: str | None, deadline: datetime | None,
 
 @app.get("/health")
 def health():
+    """Unauthenticated, so it says only whether the service and its database respond."""
+    with connect() as conn:
+        conn.execute("SELECT 1")
+    return {"status": "ok"}
+
+
+@v1.get("/import-status", dependencies=[Depends(current_profile)])
+def import_status():
     with connect() as conn:
         wm = conn.execute("SELECT watermark FROM import_state").fetchone()
-        last = conn.execute("SELECT * FROM import_run ORDER BY id DESC LIMIT 1").fetchone()
+        last = conn.execute("SELECT window_from, window_to, finished_at, releases_new, error IS NOT NULL AS failed FROM import_run ORDER BY id DESC LIMIT 1").fetchone()
     return {"watermark": wm and wm["watermark"], "last_run": last}
 
 
-@app.get("/opportunities", response_model=list[OpportunityOut])
+@v1.get("/opportunities", response_model=list[OpportunityOut], dependencies=[Depends(current_profile)])
 def opportunities(cpv: list[str] = Query(default=[]), region: list[str] = Query(default=[]),
                   open_only: bool = True, q: str | None = None, limit: int = Query(50, le=200), offset: int = 0):
     now = datetime.now(timezone.utc)
-    where, args = ["TRUE"], []
+    where: list[str] = ["TRUE"]
+    args: list = []
     if cpv:
         where.append("EXISTS (SELECT 1 FROM unnest(o.cpv_codes) c WHERE c LIKE ANY(%s))")
         args.append([f"{c}%" for c in cpv])
@@ -98,3 +121,9 @@ def opportunities(cpv: list[str] = Query(default=[]), region: list[str] = Query(
         s = effective_status(r["status"], r["status_reason"], r["deadline"], r["last_checked_at"], now)
         out.append(OpportunityOut(**{**r, "status": s.status, "status_reason": s.reason, "amended": r["versions"] > 1}))
     return out
+
+
+v1.include_router(accounts_router)
+v1.include_router(router)
+v1.include_router(screens_router)
+app.include_router(v1)

@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: tenderfit
+          POSTGRES_PASSWORD: tenderfit  # a throwaway service container, reachable only from this job
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U tenderfit" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # With this set, a missing database fails the run: tests that need it cannot quietly disappear.
+      REQUIRE_DB: "1"
+      TEST_ADMIN_DATABASE_URL: postgresql://tenderfit:tenderfit@localhost:5432/postgres
+      TEST_DATABASE_URL: postgresql://tenderfit:tenderfit@localhost:5432/tenderfit_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -e '.[dev]'
+      - run: ruff check tenderfit tests scripts
+      - name: Type check
+        run: mypy
+      - name: Migrations apply to an empty database, and a second run changes nothing
+        env:
+          DATABASE_URL: postgresql://tenderfit:tenderfit@localhost:5432/tenderfit_ci_migrate
+        run: |
+          python -c "import psycopg, os; psycopg.connect(os.environ['TEST_ADMIN_DATABASE_URL'], autocommit=True).execute('CREATE DATABASE tenderfit_ci_migrate')"
+          python -m tenderfit.db migrate
+          python -m tenderfit.db migrate | tee migrate2.txt
+          grep -q 'applied: nothing' migrate2.txt
+      - name: Tests (a skipped test fails the run)
+        run: |
+          pytest -q -ra --junitxml=junit.xml
+          python -c "import xml.etree.ElementTree as E, sys; s=E.parse('junit.xml').getroot().find('testsuite'); print('tests', s.get('tests'), 'skipped', s.get('skipped')); sys.exit(int(s.get('skipped')) > 0)"
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the whole history is scanned, not just the tip
+      - run: bash scripts/secret_scan.sh
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose -f docker-compose.yml -f docker-compose.demo.yml config -q

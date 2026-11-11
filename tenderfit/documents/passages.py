@@ -23,7 +23,8 @@ class Passage:
 
 def _split_long(text: str) -> list[str]:
     sentences = re.split(r"(?<=[.;:])\s+", text)
-    out, cur = [], []
+    out: list[str] = []
+    cur: list[str] = []
     for s in sentences:
         if cur and words(" ".join(cur + [s])) > MAX_WORDS:
             out.append(" ".join(cur))

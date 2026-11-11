@@ -5,6 +5,7 @@ from tenderfit.documents import service
 from tenderfit.ingest.importer import run_import
 from tenderfit.profile.seed import seed
 from tests import northfield
+from tests.conftest import as_supplier
 from tests.fakes import ScriptedLLM
 from tests.test_importer import NOW, T0, T1, fake
 from tests.test_pipeline import TODAY, portal, verdicts
@@ -92,8 +93,7 @@ def test_profile_fact_change_reaches_verdicts_that_used_it(db, tmp_path, monkeyp
 
 
 def test_changes_endpoint_and_profile_change(db, _test_db, tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-    from tenderfit.api.main import app
+
     from tenderfit.changes.apply import apply_profile_change
     monkeypatch.setattr("tenderfit.config.settings.database_url", _test_db)
     atlas, lot1, v1, llm, kw, a1 = setup_v1(db, tmp_path, monkeypatch)
@@ -105,8 +105,8 @@ def test_changes_endpoint_and_profile_change(db, _test_db, tmp_path, monkeypatch
     assert len(llm.users) == calls
     rec = db.execute("SELECT recommendation FROM assessment WHERE id = %s", (aid,)).fetchone()["recommendation"]
     assert not rec.startswith("Blocker found")
-    with TestClient(app) as c:
-        [ev] = c.get("/changes", params={"profile_id": atlas}).json()
+    with as_supplier(db, atlas) as c:
+        [ev] = c.get("/changes").json()
         assert ev["kind"] == "profile" and ev["impacts"][0]["kept"] == 4
         moved = {a["statement"]: (a["before"], a["after"]) for a in ev["impacts"][0]["affected"]}
         assert moved["Deliver all desks within 30 days of order"] == ("not_met", "needs_confirmation")

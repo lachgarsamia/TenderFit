@@ -16,10 +16,11 @@ dependencies = [
     "anthropic>=1.0",
     "sentence-transformers>=3.0",
     "pgvector>=0.3",
+    "argon2-cffi>=23.1",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "respx>=0.21"]
+dev = ["pytest>=8", "respx>=0.21", "hypothesis>=6", "ruff>=0.6", "mypy>=1.11"]
 
 [build-system]
 requires = ["setuptools>=69"]
@@ -32,3 +33,16 @@ include = ["tenderfit*"]
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning:importlib._bootstrap"]
 markers = ["agent: runs with agent escalation enabled"]
+
+[tool.ruff]
+line-length = 170
+extend-exclude = ["web"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E731", "E501", "E741"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+packages = ["tenderfit"]

@@ -30,6 +30,7 @@ class Change:
     documents: list[dict] = field(default_factory=list)  # {"kind": added|removed|replaced|unreadable, "label", "essential"}
     cls: str = "local"
     reasons: list[str] = field(default_factory=list)
+    document_ref_ids: set[int] = field(default_factory=set)  # references to changed documents, in the old version
 
     @property
     def changed_passages(self) -> set[int]:
@@ -131,6 +132,6 @@ def classify(change: Change, mandatory_passages: set[int], lot_count_changed: bo
     if not change.fields and not any(p.kind != "unchanged" for p in change.passages) and not change.documents:
         reasons.append(("ambiguous", "new version with no detectable difference"))
     rank = {"local": 0, "structural": 1, "ambiguous": 2}
-    change.cls = max((c for c, _ in reasons), key=rank.get, default="local")
+    change.cls = max((c for c, _ in reasons), key=lambda c: rank[c], default="local")
     change.reasons = list(dict.fromkeys(r for _, r in reasons))
     return change

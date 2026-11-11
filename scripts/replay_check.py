@@ -1,9 +1,16 @@
-"""Rebuild normalised tables from raw releases and check the result matches what live imports produced."""
+"""Rebuild normalised tables from raw releases and check the result matches what live imports produced.
+
+The rebuild happens in a separate temporary database, so the database being checked is only read."""
 import sys
 from datetime import datetime, timezone
 
-from tenderfit.db import connect
-from tenderfit.ingest.importer import refresh_statuses, replay
+import psycopg
+
+from tenderfit.config import settings
+from tenderfit.db import connect, migrate
+from tenderfit.ingest.importer import replay
+
+SCRATCH = "tenderfit_replay_check"
 
 SNAPSHOT = {
     "opportunity": """SELECT o.ocid, o.status, o.deadline, o.title, o.buyer_id, o.cpv_codes, o.regions, nv.release_id
@@ -21,12 +28,28 @@ def snapshot(conn) -> dict[str, list]:
 
 def main() -> int:
     now = datetime.now(timezone.utc)
+    base = settings.database_url.rsplit("/", 1)[0]
     with connect() as conn:
-        refresh_statuses(conn, now)
-        conn.commit()
         before = snapshot(conn)
-        replay(conn, now=now)
-        after = snapshot(conn)
+        raw = conn.execute("SELECT ocid, release_id, release_date, tags, payload, sha256, source_url, fetched_at FROM raw_release ORDER BY id").fetchall()
+    with psycopg.connect(f"{base}/postgres", autocommit=True) as admin:
+        admin.execute(f"DROP DATABASE IF EXISTS {SCRATCH} WITH (FORCE)")
+        admin.execute(f"CREATE DATABASE {SCRATCH}")
+    with connect(f"{base}/{SCRATCH}") as scratch:
+        migrate(scratch)
+        for r in raw:
+            scratch.execute("""INSERT INTO raw_release (ocid, release_id, release_date, tags, payload, sha256, source_url, fetched_at)
+                               VALUES (%(ocid)s, %(release_id)s, %(release_date)s, %(tags)s, %(payload)s, %(sha256)s, %(source_url)s, %(fetched_at)s)""", r)
+        wm = None
+        with connect() as conn:
+            wm = conn.execute("SELECT source, watermark FROM import_state").fetchall()
+        for w in wm:
+            scratch.execute("INSERT INTO import_state (source, watermark) VALUES (%(source)s, %(watermark)s)", w)
+        scratch.commit()
+        replay(scratch, now=now)
+        after = snapshot(scratch)
+    with psycopg.connect(f"{base}/postgres", autocommit=True) as admin:
+        admin.execute(f"DROP DATABASE IF EXISTS {SCRATCH} WITH (FORCE)")
     ok = True
     for table in SNAPSHOT:
         diff = len({repr(r) for r in before[table]} ^ {repr(r) for r in after[table]})

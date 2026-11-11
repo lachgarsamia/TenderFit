@@ -1,6 +1,6 @@
 import re
 
-from tenderfit.llm import JsonResult, ToolTurn, Usage
+from tenderfit.llm import JsonResult, Usage
 
 
 class ScriptedLLM:

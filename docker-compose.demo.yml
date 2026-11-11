@@ -1,0 +1,16 @@
+# Fictional demonstration: no API key, no contact with Find a Tender, scripted model answers.
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml exec api python -m tenderfit.demo load
+services:
+  api:
+    environment:
+      DEMO_SCRIPTED_LLM: "true"
+      IMPORT_ENABLED: "false"
+      AGENT_ENABLED: "false"
+      REGISTRATION_ENABLED: "true"
+      SESSION_COOKIE_SECURE: "false"  # the demo is served over plain http on localhost
+  worker:
+    environment:
+      DEMO_SCRIPTED_LLM: "true"
+      IMPORT_ENABLED: "false"
+      AGENT_ENABLED: "false"

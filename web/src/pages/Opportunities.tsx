@@ -6,7 +6,8 @@ import { Card, Empty, ErrorNote, Fictional, FitPill, Icon, OppStatus, Skeleton, 
 
 const REGION: Record<string, string> = { UKC: "North East", UKD: "North West", UKE: "Yorkshire & Humber", UKF: "East Midlands",
   UKG: "West Midlands", UKH: "East of England", UKI: "London", UKJ: "South East", UKK: "South West", UKL: "Wales", UKM: "Scotland", UKN: "Northern Ireland" };
-const CPV: Record<string, string> = { "39": "Furnishings", "391": "Furniture", "3911": "Seating", "3912": "Storage", "3916": "School furniture" };
+const CPV: Record<string, string> = { "39": "Furnishings", "391": "Furniture", "3911": "Seating", "3912": "Storage", "3916": "School furniture",
+  "45": "Construction", "48": "Software", "50": "Repair and maintenance", "72": "IT services", "77": "Grounds and forestry", "79": "Business services", "85": "Health and social care", "90": "Cleaning and environmental" };
 const RANK: Record<string, number> = { blocker: 0, provisional: 1, relevant: 2, unassessed: 3, low: 4 };
 type Bucket = "assessed" | "to_assess" | "low" | "closed";
 
@@ -22,9 +23,7 @@ function bestLot(o: any) {
 export default function Opportunities() {
   usePageTitle("Opportunities");
   const { profile } = useProfile();
-  const regions = (profile?.regions ?? []).map((r) => REGION[r] ?? r);
-  const defaultQ = `Furniture tenders we could deliver in ${regions.join(", ")}`;
-  const [q, setQ] = useState(defaultQ);
+  const [q, setQ] = useState("");
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,10 +31,10 @@ export default function Opportunities() {
 
   const run = async (query = q) => {
     setBusy(true); setError(null);
-    try { setData(await post("/search", { q: query, profile_id: profile!.id, limit: 40 })); }
+    try { setData(await post("/search", { q: query, limit: 40 })); }
     catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
-  useEffect(() => { setQ(defaultQ); setTab(null); run(defaultQ); }, [profile?.id]);
+  useEffect(() => { setQ(""); setTab(null); setData(null); run(""); }, [profile?.id]);
 
   const groups = useMemo(() => {
     const g: Record<Bucket, any[]> = { assessed: [], to_assess: [], low: [], closed: data?.no_longer_open ?? [] };
@@ -61,19 +60,20 @@ export default function Opportunities() {
           <label className="search-input">
             <Icon name="search" />
             <span className="sr-only">Describe what you are looking for</span>
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. school furniture in Yorkshire" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by words, or leave empty to use your products and regions" />
           </label>
           <button className="btn primary" disabled={busy}>{busy ? "Searching…" : "Search"}</button>
         </form>
         {p && (
           <div className="filters">
-            <span>Showing</span>
+            <span>{p.from_profile ? "Matched to your profile:" : "Showing"}</span>
+            {p.terms?.length > 0 && <span className="chip">Words: {p.terms.join(", ")}</span>}
             <span className="chip">{p.cpv.length ? p.cpv.map((c: string) => CPV[c] ?? `CPV ${c}`).join(", ") : "All sectors"}</span>
             <span className="chip">{p.regions.length ? p.regions.map((r: string) => REGION[r] ?? r).join(", ") : "All UK regions"}</span>
             <span className="chip">Open tenders</span>
           </div>
         )}
-        <div className="source-line">↻ Live from Find a Tender · updated {fmtDate(data?.last_import)}</div>
+        <div className="source-line">↻ {data?.last_import ? `Find a Tender · updated ${fmtDate(data.last_import)}` : "No import from Find a Tender has run yet"}</div>
       </Card>
 
       <ErrorNote error={error} />
@@ -87,7 +87,7 @@ export default function Opportunities() {
         ]} />
         {!data ? <div style={{ padding: "8px 20px" }}><Skeleton /></div> : list.length === 0 ? (
           <Empty title={{ assessed: "Nothing assessed yet", to_assess: "No new matches", low: "No low-relevance matches", closed: "Nothing has closed" }[active]}>
-            {active === "assessed" ? "Open a tender under To assess and choose Assess this lot." : "Try a broader search."}
+            {active === "assessed" ? "Open a tender under To assess and choose Assess this lot." : "Try other words, or a broader search."}
           </Empty>
         ) : (
           <ul className="rows">
@@ -95,7 +95,7 @@ export default function Opportunities() {
               <li key={o.id}><div className="row-link" style={{ cursor: "default" }}>
                 <div><div className="row-sub">{o.buyer}</div><div className="row-title">{o.title}</div></div>
                 <div className="when-col"><div className="strike small">{fmtDate(o.deadline)}</div><OppStatus status={o.status} /></div>
-                <div className="fit-col small muted">{o.status_reason}. Earlier assessment archived.</div><span />
+                <div className="fit-col small muted">{o.status_reason}. <Link to={`/tenders/${o.id}`}>See tender</Link></div><span />
               </div></li>
             ) : <Row key={o.id} o={o} />)}
           </ul>
@@ -110,7 +110,7 @@ function Row({ o }: { o: any }) {
   const days = daysLeft(o.deadline);
   return (
     <li>
-      <Link className="row-link" to={`/lots/${lot.id}`}>
+      <Link className="row-link" to={o.lots.length === 1 ? `/lots/${lot.id}` : `/tenders/${o.id}`}>
         <div style={{ minWidth: 0 }}>
           <div className="row-sub">{o.buyer}{o.lots.length > 1 ? ` · ${o.lots.length} lots` : ""} {o.fictional && <Fictional />}</div>
           <div className="row-title">{o.title}</div>

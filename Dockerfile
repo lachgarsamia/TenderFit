@@ -6,4 +6,6 @@ COPY tenderfit ./tenderfit
 RUN pip install --no-cache-dir .
 COPY migrations ./migrations
 COPY scripts ./scripts
-ENV DOCUMENT_DIR=/data/documents HF_HOME=/data/hf
+RUN useradd --create-home --uid 1000 tenderfit && mkdir -p /data && chown tenderfit /data
+ENV DOCUMENT_DIR=/data/documents HF_HOME=/data/hf EVAL_REPORT_DIR=/data/reports
+USER tenderfit

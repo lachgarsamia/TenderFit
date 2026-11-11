@@ -31,6 +31,23 @@ def false_blocker_rate(items: Sequence[Item]) -> float:
     return safe_div(sum(i.pred == "not_met" for i in neg), len(neg))
 
 
+def false_met_rate(items: Sequence[Item]) -> float:
+    """The dangerous error: a mandatory requirement called MET when the correct answer is anything else."""
+    neg = [i for i in items if i.obligation == "mandatory" and i.gold != "met"]
+    return safe_div(sum(i.pred == "met" for i in neg), len(neg))
+
+
+def per_class(items: Sequence[Item]) -> dict[str, dict[str, float]]:
+    out = {}
+    for s in STATUSES:
+        tp = sum(i.gold == s and i.pred == s for i in items)
+        fp = sum(i.gold != s and i.pred == s for i in items)
+        fn = sum(i.gold == s and i.pred != s for i in items)
+        if tp + fp + fn:
+            out[s] = {"precision": safe_div(tp, tp + fp), "recall": safe_div(tp, tp + fn), "support": tp + fn}
+    return out
+
+
 def macro_f1(items: Sequence[Item]) -> float:
     f1s = []
     for s in STATUSES:
@@ -52,6 +69,10 @@ def extraction_recall(items: Sequence[Item], obligation: str = "mandatory") -> f
 def precision_at_k(ranked: Sequence[str], relevant: set[str], k: int = 10) -> float:
     top = list(ranked)[:k]
     return safe_div(sum(r in relevant for r in top), len(top))
+
+
+def recall_at_k(ranked: Sequence, relevant: set, k: int = 5) -> float:
+    return safe_div(len(set(list(ranked)[:k]) & relevant), len(relevant))
 
 
 def ndcg_at_k(ranked: Sequence[str], gains: dict[str, float], k: int = 10) -> float:
@@ -79,15 +100,21 @@ def kappa(a: Sequence[str], b: Sequence[str]) -> float:
 
 
 def paired_bootstrap(units: Sequence, metric: Callable[[Sequence], float], a: Callable, b: Callable,
-                     n: int = 2000, seed: int = 0) -> dict:
-    """CI for metric(b) - metric(a), resampling the same units for both configurations (Efron & Tibshirani)."""
+                     n: int = 2000, seed: int = 0, cluster: Callable | None = None) -> dict:
+    """CI for metric(b) - metric(a), resampling the same units for both configurations (Efron & Tibshirani).
+
+    Requirements of one notice are not independent. Pass cluster to resample whole notices, or the interval is too narrow."""
     rng = random.Random(seed)
     def diff(sample):
         return metric([b(u) for u in sample]) - metric([a(u) for u in sample])
+    groups: dict = {}
+    for u in units:
+        groups.setdefault(cluster(u) if cluster else id(u), []).append(u)
+    keys = list(groups)
     point = diff(units)
     stats = []
     for _ in range(n):
-        s = [units[rng.randrange(len(units))] for _ in units]
+        s = [u for _ in keys for u in groups[keys[rng.randrange(len(keys))]]]
         d = diff(s)
         if not math.isnan(d):
             stats.append(d)
