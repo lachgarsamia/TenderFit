@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     lot_time_cap_s: float = 180
     agent_enabled: bool = True
     agent_max_tool_calls: int = 8
+    versionrag_enabled: bool = False
     retrieval_min_score: float | None = None  # no default: a threshold must come from an evaluation on real data
     corrective_max_attempts: int = 1
     max_upload_bytes: int = 25 * 1024 * 1024

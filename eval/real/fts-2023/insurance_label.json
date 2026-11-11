@@ -1,0 +1,14 @@
+{
+  "original": "031065-2023",
+  "amendment": "031188-2023",
+  "requirement": "Hold or commit to obtaining public liability insurance before contract commencement",
+  "scope": "All lots, public liability component only",
+  "dependency": "SQ Questionnaire question 82, corrected by F14 section VII.1.2",
+  "v1_source": "F14/CHANGES/CHANGE/OLD_VALUE/TEXT, question 82. Retrospective reconstruction. The original notice does not contain the questionnaire.",
+  "v2_source": "F14/CHANGES/CHANGE/NEW_VALUE/TEXT, question 82",
+  "old_gbp": 10000000,
+  "new_gbp": 5000000,
+  "supplier": "Fictional supplier with documented GBP 5m public liability cover through commencement. It explicitly declines to increase cover.",
+  "expected": ["not_met", "met"],
+  "control": "If willingness to increase cover is unknown, the original requirement needs confirmation."
+}

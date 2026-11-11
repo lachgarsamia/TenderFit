@@ -55,7 +55,9 @@ class OverlapReranker:
 def portal(delivery_days: int = 30, edit=None) -> httpx.Client:
     def handler(r: httpx.Request) -> httpx.Response:
         if r.url.path.endswith(".pdf"):
-            return httpx.Response(200, content=scenario.spec_pdf(delivery_days, edit), headers={
+            timetables = {"Timetable_v1.pdf": "Monday to Friday", "Timetable_v2.pdf": "Saturday and Sunday"}
+            timetable = timetables.get(r.url.path.rsplit("/", 1)[-1])
+            return httpx.Response(200, content=scenario.spec_pdf(delivery_days, edit, linked_timetable=timetable), headers={
                 "content-type": "application/pdf", "content-disposition": f'attachment; filename="{r.url.path.rsplit("/", 1)[1]}"'})
         return httpx.Response(200, html="<html>Register on the buyer portal to view this document</html>")
     return httpx.Client(transport=httpx.MockTransport(handler))
@@ -137,7 +139,8 @@ def load(conn, a) -> None:
         return
     ids = seed_suppliers(conn, today)
     bright, oak = ids[SUPPLIERS[0]], ids[SUPPLIERS[1]]
-    _import(conn, scenario.release(today), today)
+    original = scenario.release(today, spec="https://portal.test/harrowgate/Timetable_v1.pdf") if getattr(a, "linked_timetable", False) else scenario.release(today)
+    _import(conn, original, today)
     opp = conn.execute("SELECT id, current_version_id v FROM opportunity WHERE ocid = %s", (scenario.OCID,)).fetchone()
     lots = {r["lot_no"]: r["id"] for r in conn.execute("SELECT id, lot_no FROM lot WHERE opportunity_id = %s", (opp["id"],))}
     llm = DemoLLM()
@@ -159,8 +162,11 @@ def amend(conn, a) -> None:
     try:
         if not conn.execute("SELECT 1 FROM notice_version WHERE release_id = %s", (AMENDMENT,)).fetchone():
             # 45 days instead of 30; the deadline moves two weeks, past the public liability policy's end date.
+            initial = must(conn.execute("SELECT fields FROM notice_version WHERE ocid=%s ORDER BY published_at LIMIT 1", (scenario.OCID,)).fetchone())
+            linked = any((d.get("url") or "").endswith("/Timetable_v1.pdf") for d in initial["fields"]["documents"])
+            filename = "Timetable_v2.pdf" if linked else "Specification_v2.pdf"
             _import(conn, scenario.release(today, rid=AMENDMENT, tag="tenderUpdate", published_days_ago=1, deadline_in=35,
-                                           spec="https://portal.test/harrowgate/Specification_v2.pdf"), today)
+                                           spec=f"https://portal.test/harrowgate/{filename}"), today)
         DemoLLM.failing = 1 if a.fail_first else 0
         impacts = _process_pending(conn, DemoLLM(), portal(45), {"agent": False, **_models(a)})
     except ChangeProcessingError as e:
@@ -216,6 +222,7 @@ def reset(conn, a) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m tenderfit.demo")
     p.add_argument("command", choices=["load", "amend", "reset"])
+    p.add_argument("--linked-timetable", action="store_true", help="load the two-hop timetable scenario")
     p.add_argument("--fast", action="store_true", help="hashing embedder instead of the real models")
     p.add_argument("--fail-first", action="store_true", help="make the first amendment attempt fail")
     p.add_argument("--audit", action="store_true", help="also run the full re-check against the targeted result")

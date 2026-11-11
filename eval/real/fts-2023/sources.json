@@ -1,0 +1,1006 @@
+{
+  "027655-2023": {
+    "filename": "027655-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%2019th%20September%202023.zip",
+    "sha256": "8b01ff52bf66b6d7921e3fdbd20988a00b82b9b462d0c1a71ceab1fe71f26b32",
+    "url": "https://www.find-tender.service.gov.uk/Notice/027655-2023",
+    "form": "F05_2014",
+    "title": "Replacement of Aeronautical Ground Lighting (AGL)",
+    "sector": "Construction work for airfields, runways and manoeuvring surfaces Runway lights Runway construction works Lighting for aircraft guidance and illumination Airport Lighting System (PAPI)",
+    "submission": "2023-10-27",
+    "opening": "2023-10-27",
+    "dispatch": "2023-09-19",
+    "original_reference": "",
+    "changes": []
+  },
+  "029049-2023": {
+    "filename": "029049-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%203rd%20October%202023.zip",
+    "sha256": "d86d9ffc4792c5c41d60dd997aa92b4633c2d8d3b44f5872d03330f3e90ea13e",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029049-2023",
+    "form": "F14_2014",
+    "title": "Replacement of Aeronautical Ground Lighting (AGL)",
+    "sector": "Construction work for airfields, runways and manoeuvring surfaces",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-03",
+    "original_reference": "2023/S 000-027655",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit",
+        "old": "2023-10-27 \n           12:00",
+        "new": "2023-11-10 \n           12:00"
+      },
+      {
+        "where": "IV.2.7",
+        "lot": "",
+        "label": "Conditions for opening of tenders",
+        "old": "2023-10-27 \n           12:00",
+        "new": "2023-11-10 \n           12:00"
+      }
+    ]
+  },
+  "026537-2023": {
+    "filename": "026537-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%207th%20September%202023.zip",
+    "sha256": "f0f7c2eaeb7cf53dd07b41c228b3ab682a118143ef9cc4ece932d7da8a9715ec",
+    "url": "https://www.find-tender.service.gov.uk/Notice/026537-2023",
+    "form": "F02_2014",
+    "title": "Safeguarding Support for Covid-19 Inquiry",
+    "sector": "Guidance and counselling services Guidance services Counselling services Staff development services Staff training services Personal development training services",
+    "submission": "2023-10-05",
+    "opening": "2023-10-05",
+    "dispatch": "2023-09-07",
+    "original_reference": "",
+    "changes": []
+  },
+  "029056-2023": {
+    "filename": "029056-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%203rd%20October%202023.zip",
+    "sha256": "1a317e6341114a92bbc34ccb73962df440a65ade40669872ad405b0b9e783b5f",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029056-2023",
+    "form": "F14_2014",
+    "title": "Safeguarding Support for Covid-19 Inquiry",
+    "sector": "Guidance and counselling services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-03",
+    "original_reference": "2023/S 000-026537",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit for receipt of expressions of interest",
+        "old": "2023-10-05 \n           15:00",
+        "new": "2023-10-11 \n           09:00"
+      }
+    ]
+  },
+  "026560-2023": {
+    "filename": "026560-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%208th%20September%202023.zip",
+    "sha256": "730a6f20c90d320aeeb4e7da2ce17c92fc2048794aef4fbac427deb40ba1896d",
+    "url": "https://www.find-tender.service.gov.uk/Notice/026560-2023",
+    "form": "F21_2014",
+    "title": "Locality and Intensive Family Support Services",
+    "sector": "Social work and related services",
+    "submission": "2023-10-18",
+    "opening": "",
+    "dispatch": "2023-09-08",
+    "original_reference": "",
+    "changes": []
+  },
+  "029161-2023": {
+    "filename": "029161-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%203rd%20October%202023.zip",
+    "sha256": "0e128f774dfc67236cf3df03f6e2dedba5c0202a026839a7c997accb657b4b79",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029161-2023",
+    "form": "F14_2014",
+    "title": "Locality and Intensive Family Support Services",
+    "sector": "Social work and related services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-03",
+    "original_reference": "2023/S 000-026560",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit",
+        "old": "2023-10-18 \n           12:00",
+        "new": "2023-10-23 \n           12:00"
+      }
+    ]
+  },
+  "029159-2023": {
+    "filename": "029159-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%203rd%20October%202023.zip",
+    "sha256": "94f537784fb94797e1159e17b6617e2f13228e9db1b3265197652a829373af8e",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029159-2023",
+    "form": "F02_2014",
+    "title": "Address Tracing and Mortality Screening – Member Data Services",
+    "sector": "Pension fund management services Pension investment services Pension services Application service providers",
+    "submission": "2023-11-03",
+    "opening": "2023-11-03",
+    "dispatch": "2023-10-03",
+    "original_reference": "",
+    "changes": []
+  },
+  "029197-2023": {
+    "filename": "029197-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%204th%20October%202023.zip",
+    "sha256": "e1f965a1ea2d3967bbec126c018ebc06027890e173d36d7d4bca21d2d9915620",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029197-2023",
+    "form": "F14_2014",
+    "title": "Address Tracing and Mortality Screening – Member Data Services",
+    "sector": "Pension fund management services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-04",
+    "original_reference": "2023/S 000-029159",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit",
+        "old": "2023-11-03 \n           14:00",
+        "new": "2023-11-06 \n           14:00"
+      }
+    ]
+  },
+  "028120-2023": {
+    "filename": "028120-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%2025th%20September%202023.zip",
+    "sha256": "d0695ef3b68f2cfe36913ae74579c6d1aa3b12828dbe475ae7f52302fc73d72b",
+    "url": "https://www.find-tender.service.gov.uk/Notice/028120-2023",
+    "form": "F02_2014",
+    "title": "Lift Modernisation Programme",
+    "sector": "Lift installation work Lifting and handling equipment and parts Lifting and handling equipment Lifts Mechanical lifts Parts of lifting and handling equipment Parts of lifts Parts of winding gear and other lifting or handling equipment Stairlifts",
+    "submission": "2023-10-25",
+    "opening": "2023-10-25",
+    "dispatch": "2023-09-25",
+    "original_reference": "",
+    "changes": []
+  },
+  "029198-2023": {
+    "filename": "029198-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%204th%20October%202023.zip",
+    "sha256": "68e0a2180121b44d036e06d623075df607346979870a9c8fa88dd69b825c5f4a",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029198-2023",
+    "form": "F14_2014",
+    "title": "Lift Modernisation Programme",
+    "sector": "Lift installation work",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-04",
+    "original_reference": "2023/S 000-028120",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit",
+        "old": "2023-10-25 \n           17:00",
+        "new": "2023-11-08 \n           17:00"
+      },
+      {
+        "where": "IV.2.7",
+        "lot": "",
+        "label": "Conditions for opening of tenders",
+        "old": "2023-10-25 \n           17:00",
+        "new": "2023-11-08 \n           17:00"
+      }
+    ]
+  },
+  "026000-2023": {
+    "filename": "026000-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%204th%20September%202023.zip",
+    "sha256": "5211f77ee08acc5f5de3f613119dabf25e6ed5c2fd065d0e2e846227897087bd",
+    "url": "https://www.find-tender.service.gov.uk/Notice/026000-2023",
+    "form": "F02_2014",
+    "title": "UHD - Chiller Resilience at Poole General Hospital",
+    "sector": "Installation work of refrigeration equipment",
+    "submission": "2023-10-04",
+    "opening": "2023-09-04",
+    "dispatch": "2023-09-04",
+    "original_reference": "",
+    "changes": []
+  },
+  "029214-2023": {
+    "filename": "029214-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%204th%20October%202023.zip",
+    "sha256": "1375a2ab571ea6a284475c4379d18b63278a60c2836f7bd2f808929324843abd",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029214-2023",
+    "form": "F14_2014",
+    "title": "UHD- Chiller Resilience at Poole General Hospital",
+    "sector": "Installation work of refrigeration equipment",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-04",
+    "original_reference": "2023/S 000-026000",
+    "changes": [
+      {
+        "where": "IV.2.2.1",
+        "lot": "",
+        "label": "",
+        "old": "2023-10-04",
+        "new": "2023-10-13"
+      }
+    ]
+  },
+  "027263-2023": {
+    "filename": "027263-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%2014th%20September%202023.zip",
+    "sha256": "1a67cf35ccd9dd7ff6f2dd712a2b046ee65116a3ff783d439f7afb6967aaca41",
+    "url": "https://www.find-tender.service.gov.uk/Notice/027263-2023",
+    "form": "F02_2014",
+    "title": "UKRI-2814 Optical System Design and Analysis Services",
+    "sector": "Engineering design services Engineering services",
+    "submission": "2023-10-23",
+    "opening": "2023-10-23",
+    "dispatch": "2023-09-14",
+    "original_reference": "",
+    "changes": []
+  },
+  "029261-2023": {
+    "filename": "029261-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%204th%20October%202023.zip",
+    "sha256": "8a0f1903076f39c84c3db72f47e25eabdb1c850922d3d596cace83c4d8a09102",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029261-2023",
+    "form": "F14_2014",
+    "title": "UKRI-2814 Optical System Design and Analysis Services",
+    "sector": "Engineering design services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-04",
+    "original_reference": "2023/S 000-027263",
+    "changes": [
+      {
+        "where": "IV.2.2)",
+        "lot": "",
+        "label": "Time limit for receipt of tenders or requests to participate",
+        "old": "2023-10-23 \n           14:00",
+        "new": "2023-11-14 \n           14:00"
+      },
+      {
+        "where": "IV.2.7)",
+        "lot": "",
+        "label": "Conditions for opening of tenders",
+        "old": "2023-10-23 \n           14:00",
+        "new": "2023-11-14 \n           14:00"
+      }
+    ]
+  },
+  "021384-2023": {
+    "filename": "021384-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-07/UK%20Public%20Procurement%20Notices%20-%2025th%20July%202023.zip",
+    "sha256": "60553a3cb82d5c7bc688b46396cbffcbdfbc2bdeeb9649aaa80a9606bc0a3bd7",
+    "url": "https://www.find-tender.service.gov.uk/Notice/021384-2023",
+    "form": "F02_2014",
+    "title": "LCC Print and Distribution of County News",
+    "sector": "Business services: law, marketing, consulting, recruitment, printing and security Printing and delivery services Printing and distribution services",
+    "submission": "2023-08-25",
+    "opening": "",
+    "dispatch": "2023-07-25",
+    "original_reference": "",
+    "changes": []
+  },
+  "029508-2023": {
+    "filename": "029508-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%206th%20October%202023.zip",
+    "sha256": "229431ed90a4744e3e5789a9395df881178abe3ba38365c228ea50b30dc9d999",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029508-2023",
+    "form": "F14_2014",
+    "title": "LCC Print and Distribution of County News",
+    "sector": "Printing and delivery services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-06",
+    "original_reference": "2023/S 000-021384",
+    "changes": [
+      {
+        "where": "II.1.4",
+        "lot": "",
+        "label": "Short Description",
+        "old": "The services which are being procured as part of this Procurement are for the Print and Distribution of an estimated 354,375 copies of the County News magazine for residents produced three times each year. Each Edition contains 24 pages and is distributed across all seven of the county’s district council areas (East Lindsey, West Lindsey, City of Lincoln, North Kesteven, South Kesteven, Boston and South Holland).",
+        "new": "The services which are being procured as part of this Procurement are for the Print and Distribution of an estimated 375,319 copies of the County News magazine for residents produced three times each year. Each Edition contains 24 pages and is distributed across all seven of the county’s district council areas (East Lindsey, West Lindsey, City of Lincoln, North Kesteven, South Kesteven, Boston and South Holland)."
+      },
+      {
+        "where": "II.2.4",
+        "lot": "",
+        "label": "Description of the Procurement",
+        "old": "The services which are being procured as part of this Procurement are for the Print and Distribution of an estimated 354,375 copies of the County News magazine for residents produced three times each year. Each Edition contains 24 pages and is distributed across all seven of the county’s district council areas (East Lindsey, West Lindsey, City of Lincoln, North Kesteven, South Kesteven, Boston and South Holland).",
+        "new": "The services which are being procured as part of this Procurement are for the Print and Distribution of an estimated 375,319 copies of the County News magazine for residents produced three times each year. Each Edition contains 24 pages and is distributed across all seven of the county’s district council areas (East Lindsey, West Lindsey, City of Lincoln, North Kesteven, South Kesteven, Boston and South Holland)."
+      },
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit for receipt of tenders or requests to participate",
+        "old": "2023-08-25 \n           12:00",
+        "new": "2023-11-10 \n           10:00"
+      }
+    ]
+  },
+  "026166-2023": {
+    "filename": "026166-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%205th%20September%202023.zip",
+    "sha256": "bffe2212676470b8770e91825c9d81c7b60bd0f4bce91a48597df1407de8d3b5",
+    "url": "https://www.find-tender.service.gov.uk/Notice/026166-2023",
+    "form": "F02_2014",
+    "title": "705616451 - Provision and Fixing of Military Pattern Memorials for Armed Forces Personnel",
+    "sector": "Limestone Granite",
+    "submission": "2023-10-10",
+    "opening": "2023-10-10",
+    "dispatch": "2023-09-05",
+    "original_reference": "",
+    "changes": []
+  },
+  "029575-2023": {
+    "filename": "029575-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%206th%20October%202023.zip",
+    "sha256": "b936d5ac49905d626e468122979f67dc55be9a265d0c3810eb6ee127b85ef512",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029575-2023",
+    "form": "F14_2014",
+    "title": "7705616451-Provision and Fixing of Military Pattern Memorials for Armed Forces Personnel-Updated",
+    "sector": "Limestone",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-06",
+    "original_reference": "2023/S 000-026166",
+    "changes": [
+      {
+        "where": "II.2.4",
+        "lot": "",
+        "label": "",
+        "old": "The approximate annual requirement is for 60 Portland headstones, 15 Karin Granite headstones and up to 25 Nabresina Limestone Urn Plot Markers per year although this could increase or decrease. The estimated total value excluding VAT is in between £1 GBP and £600,00 GBP. Full details of the requirement (including specifications for memorial sizes, shapes, carving of letters, service crests, regimental badges and religious emblems) can be found in the Statement of Requirement which is contained in the DEFFORM 47 - Invitation to Tender (ITT) document which is available in the Attachments Area on the Defence Sourcing Portal (see www.contracts.mod.uk) using project code 705616451. The contract duration is 24 months with the option for the authority, at its discretion, to extend the duration of the contract in monthly or annual increments up to a total of 48 months. It is a mandatory requirement that contractors are members of the National Association of Memorial Masons (NAMM) or an equivalent association and are registered on a nationally recognised fixing register such as the register of qualified memorial fixers (RQMF) or the British Register of Accredited Memorial Masons (BRAMM). No business what so ever is guaranteed under any resulting framework agreement or contract, indeed there is no guarantee that any framework or contract will be put in place in relation to this notice. No compensation etc. will be paid if a tender or resulting framework agreement is withdrawn for any reason. Bidders should take apart in this process only on the basis that they fully understand and accept this position. Suppliers interested in this requirement should register on the Defence Sourcing Portal (DSP) at https://contracts.mod.uk/web/login.html, where they will be able to access the tender documents using Project code 705616451, complete all questions and submit their tender documents via the DSP in accordance with the instructions in the DEFFORM 47 – ITT document by 10.00 a.m. on 10 Oct 2023. Any tender Clarification Questions should also be submitted through the DSP using the messaging facility.",
+        "new": "The approximate annual requirement is for 60 Portland headstones, 15 Karin Granite headstones and up to 25 Nabresina Limestone Urn Plot Markers per year although this could increase or decrease. The estimated total value excluding VAT is in between £1 GBP and £600,00 GBP. Full details of the requirement (including specifications for memorial sizes, shapes, carving of letters, service crests, regimental badges and religious emblems) can be found in the Statement of Requirement which is contained in the DEFFORM 47 - Invitation to Tender (ITT) document which is available in the Attachments Area on the Defence Sourcing Portal (see www.contracts.mod.uk) using project code 705616451. The contract duration is 24 months with the option for the authority, at its discretion, to extend the duration of the contract in monthly or annual increments up to a total of 48 months. It is a mandatory requirement that contractors are members of the National Association of Memorial Masons (NAMM) or an equivalent association and are registered on a nationally recognised fixing register such as the register of qualified memorial fixers (RQMF) or the British Register of Accredited Memorial Masons (BRAMM). No business what so ever is guaranteed under any resulting framework agreement or contract, indeed there is no guarantee that any framework or contract will be put in place in relation to this notice. No compensation etc. will be paid if a tender or resulting framework agreement is withdrawn for any reason. Bidders should take apart in this process only on the basis that they fully understand and accept this position. Suppliers interested in this requirement should register on the Defence Sourcing Portal (DSP) at https://contracts.mod.uk/web/login.html, where they will be able to access the tender documents using Project code 705616451, complete all questions and submit their tender documents via the DSP in accordance with the instructions in the DEFFORM 47 – ITT document by 10.00 a.m. on 31 Oct 2023. Any tender Clarification Questions should also be submitted through the DSP using the messaging facility."
+      }
+    ]
+  },
+  "029642-2023": {
+    "filename": "029642-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%209th%20October%202023.zip",
+    "sha256": "4a42f747908f294412a7277a55213f2d9050754a88c91b02db76b229cafadd11",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029642-2023",
+    "form": "F21_2014",
+    "title": "2023 -  Aberdeen City - Whole Family Support Services",
+    "sector": "Health and social work services",
+    "submission": "2023-11-17",
+    "opening": "",
+    "dispatch": "2023-10-09",
+    "original_reference": "",
+    "changes": []
+  },
+  "029646-2023": {
+    "filename": "029646-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%209th%20October%202023.zip",
+    "sha256": "9a7bf05ef06aefb5a0fde6c36011fa8b37f35d5c079022c116cee8c0aa148116",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029646-2023",
+    "form": "F14_2014",
+    "title": "2023 -  Aberdeen City - Whole Family Support Services",
+    "sector": "Health and social work services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-09",
+    "original_reference": "2023/S 000-029642",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit",
+        "old": "2023-11-17 \n           12:00",
+        "new": "2023-11-20 \n           12:00"
+      }
+    ]
+  },
+  "026847-2023": {
+    "filename": "026847-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%2011th%20September%202023.zip",
+    "sha256": "d47fa92203616c9bdb308e9d739abdbd3b9d7c525c33b4b2cdeb0e411c47e4b0",
+    "url": "https://www.find-tender.service.gov.uk/Notice/026847-2023",
+    "form": "F02_2014",
+    "title": "HRA M&T Design and Build Contract",
+    "sector": "Construction work",
+    "submission": "2023-12-04",
+    "opening": "2023-12-04",
+    "dispatch": "2023-09-11",
+    "original_reference": "",
+    "changes": []
+  },
+  "029665-2023": {
+    "filename": "029665-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%209th%20October%202023.zip",
+    "sha256": "f9d8694302ae0732161d7e0835e90db2b88604ecaa9c2e2c235d9e742deb8234",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029665-2023",
+    "form": "F14_2014",
+    "title": "HRA M&T Design and Build Contract",
+    "sector": "Construction work",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-09",
+    "original_reference": "2023/S 000-026847",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit for receipt of tenders or requests to participate",
+        "old": "2023-12-04 \n           12:00",
+        "new": "2023-10-30 \n           12:00"
+      }
+    ]
+  },
+  "029555-2023": {
+    "filename": "029555-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%206th%20October%202023.zip",
+    "sha256": "4e4ceabed8f68ee3fc8d89304365e157c0fc8b88661c766bc1abf81785fa8ba9",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029555-2023",
+    "form": "F05_2014",
+    "title": "Network Rail Eastern Midland Main Line Electrification Partnership Framework",
+    "sector": "Construction work Site preparation work Works for complete or part construction and civil engineering work Building construction work Construction work for buildings relating to railway transport Railway station construction work Railway bridge construction work Building installation work Geotechnical engineering services",
+    "submission": "2023-12-01",
+    "opening": "",
+    "dispatch": "2023-10-06",
+    "original_reference": "",
+    "changes": []
+  },
+  "029689-2023": {
+    "filename": "029689-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%209th%20October%202023.zip",
+    "sha256": "ca3afa0927b3b92fa61d7703fa97b030f1be27f3a74bc0bdc652e53b3a87b313",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029689-2023",
+    "form": "F14_2014",
+    "title": "Network Rail Eastern Midland Main Line Electrification Partnership Framework",
+    "sector": "Construction work",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-09",
+    "original_reference": "2023/S 000-029555",
+    "changes": [
+      {
+        "where": "II.2.6",
+        "lot": "2",
+        "label": "",
+        "old": "Value excluding VAT: £3,400,000,000",
+        "new": "Value excluding VAT: £250,000,000"
+      },
+      {
+        "where": "II.2.6",
+        "lot": "3",
+        "label": "",
+        "old": "Value excluding VAT: £450,000,000",
+        "new": "Value excluding VAT: £425,000,000"
+      },
+      {
+        "where": "II.2.6",
+        "lot": "4",
+        "label": "",
+        "old": "Value excluding VAT: £100,000,000",
+        "new": "Value excluding VAT: £80,000,000"
+      },
+      {
+        "where": "II.1.4",
+        "lot": "",
+        "label": "",
+        "old": "Network Rail (NR) intends to select suppliers to the Midland Main Line Electrification (MMLE) Partnership Framework for an initial term of 5 years with the option to extend yearly increments up to a further 5 years. \n             The MMLE programme will extend electric operation on the MML through to Nottingham and Sheffield. To help realise early electrification benefits Route Section (between Market Harborough to Wigston South) has been delivered separately from the remaining route sections as a continuation of the existing programme. The scope of this procurement is for the next stage of the electrification between Wigston and Nottingham out to Sheffield. The values for each Lot are estimates only. As such, they are not guaranteed and do not act as a minimum or maximum work value for the programme nor a guarantee as to volume. \n             One key MMLE objective is ‘delivery on spend per single track kilometre (£/STK) target’. The recently commissioned London to Corby electrification was delivered at a rate of £3.7m per STK with the application of SPEED principles. The next stage of electrification is targeted to deliver £2.5m per STK. This programme focuses on challenging and driving down the STK rate. Details of all the MMLE objectives can be found in the Strategic Brief. \n             The Framework shall be split into the 4 work disciplines across the following delivery lots: Lot 1 – Power & Distribution; Lot 2 – Structures & Civils; Lot 3 – OLE & Integration; Lot 4 – Signalling & Telecoms. The values for each Lot are estimates only. As such, they are not guaranteed and do not act as a minimum or maximum work value for the programme nor a guarantee as to volume. There will be 1 Partner plus 2 pre-qualified reserve suppliers appointed to Lots 1, 2, 3 & 4 on the framework. Reserve suppliers have been included to achieve appropriate resilience in delivery and to ensure business contingency. Tenderers may bid for any number of lots, and be awarded on a maximum of 2 different lots. \n             The Partnership Framework includes a performance-based incentive mechanism to drive the STK rate and achieve the other MMLE objectives, including health and safety, decarbonisation and social value. Partners will be incentivised both individually and collectively. \n             There will be an opportunity to comment on the contractual documentation. NR will determine which, if any, changes should result in revisions to the Framework based on the objective merit of the proposed changes. Further detail is set out in the Instructions to Participants. The contractual documentation will not be subject to negotiation. The negotiations will relate to the price element only. Participants will have an opportunity to update their tenders following negotiations. Initial Tenders will be evaluated but feedback will not be shared with participants. Only feedback on Final Tenders will be shared. \n             Please note, that the value ranges of each Lot in the Instructions to Participants are indicative only. Similarly, whilst the Contract Notice states a Framework value cap of £1.2bn, NR currently has internal governance approval for a Framework value of £950 million (associated with the main elements of the MMLE works as currently envisaged). The higher value included in the Contract Notice is not an absolute cap but is indicative of the potential level to which the original budget could increase if additional works and services to that which is currently envisaged, are required. All values are estimates only, and the final values will depend on the precise works and services required to be delivered, the means of delivery, the way in which projects and project risks materialise, the actual rates of inflation up to completion of the programme, and other factors.",
+        "new": "Network Rail (NR) intends to select suppliers to the Midland Main Line Electrification (MMLE) Partnership Framework for an initial term of 5 years with the option to extend in yearly increments up to a further 5 years. \n             The MMLE programme will extend electric operation on the MML through to Nottingham and Sheffield. To help realise early electrification benefits, Route Section 1 (between Market Harborough to Wigston South) has been delivered separately from the remaining route sections as a continuation of the existing programme.  \n             The scope of this procurement is for the next stage of the electrification between Wigston and Nottingham out to Sheffield.  \n             One key MMLE objective is 'delivery on spend per single track kilometre (£/STK) target'. The recently commissioned London to Corby electrification was delivered at a rate of £3.7m per STK with the application of SPEED principles. The next stage of electrification is committed to achieving a rate of £2.5m per STK through collective delivery of the MMLE objectives, using of the partnering arrangements.  \n             The Framework shall be split into the 4 work disciplines across the following delivery lots: Lot 1 - Power & Distribution; Lot 2 - Structures & Civils; Lot 3 - OLE & Integration; Lot 4 - Signalling & Telecoms. There will be 1 Partner plus up to 2 pre-qualified reserve suppliers appointed to Lots 1, 2, 3 & 4. Reserve suppliers have been included to achieve appropriate resilience in delivery and to ensure business contingency. It is intended that reserve suppliers are not awarded a framework in the first instance, but should a framework supplier become insolvent, fall below required performance levels or other such event, then a reserve supplier would be engaged. The detail of this process will be confirmed at the ITT stage of the procurement. \n             Tenderers may bid for any number of lots, and be awarded on a maximum of 2 different lots. \n             The Partnership Framework includes a performance-based incentive mechanism to achieve the target STK rate and other MMLE objectives, including health and safety, decarbonisation and social value. Partners will be incentivised both individually and collectively. \n             There will be an opportunity to comment on the contractual documentation at the ITT stage of the procurement. NR will determine which, if any, changes should result in revisions to the Framework based on the objective merit of the proposed changes. The contractual documentation will not be subject to negotiation. Any negotiations will relate to the price element only. Participants will have an opportunity to update their tenders following negotiations.  \n             Please note, that the value ranges of each Lot and total estimated value included in this contract notice are indicative only. Despite the £1.2 billion figure included in section II.1.5, NR currently has internal governance approval for a framework value of £950 million (associated with the main elements of the MMLE works as currently envisaged). The higher value included in this contract notice is not an absolute cap but is indicative of the potential level to which the original budget could increase if additional works and services to that which is currently envisaged, are required. All values are estimates only, and the final values will depend on the precise works and services required to be delivered, the means of delivery, the way in which projects and project risks materialise, the actual rates of inflation up to completion of the programme, and other factors. As such, they are not guaranteed and do not act as a minimum or maximum work value for the programme nor a guarantee as to volume."
+      }
+    ]
+  },
+  "029516-2023": {
+    "filename": "029516-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%206th%20October%202023.zip",
+    "sha256": "f1901144735df028cf3b639639d1a1dcee601c5f4752773d1bdf39b80b9e5529",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029516-2023",
+    "form": "F02_2014",
+    "title": "Waverley Education Foundation ~ Catering Tender",
+    "sector": "School catering services",
+    "submission": "2023-10-27",
+    "opening": "",
+    "dispatch": "2023-10-06",
+    "original_reference": "",
+    "changes": []
+  },
+  "029733-2023": {
+    "filename": "029733-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%209th%20October%202023.zip",
+    "sha256": "53befda87da0e5160692d76e35c12eff27e628f3369d67ec3202bf831e85d469",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029733-2023",
+    "form": "F14_2014",
+    "title": "Waverley Education Foundation ~ Catering Tender",
+    "sector": "School catering services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-09",
+    "original_reference": "2023/S 000-029516",
+    "changes": [
+      {
+        "where": "II.1",
+        "lot": "",
+        "label": "II.1.5",
+        "old": "2,280,000",
+        "new": "2,780,000"
+      },
+      {
+        "where": "II.2",
+        "lot": "",
+        "label": "II.2.4",
+        "old": "Waverley School is larger than the average-sized school. It is an all through school for pupils aged 4-19 currently there are circa 1,800 pupils on role and within Waverley Studio College a further 250 pupils. Waverley School moved into a brand-new purpose-built facility in 2013 and has continued to thrive. It is the Executive Principal’s and the Trustee’s aim to continue to build on this and wish to employ a suitably skilled, flexible and experienced catering contractor who will recognise the changes that have taken place over the past few years, providing advice, innovation and expertise. This will be a major benefit to the school and will contribute significantly towards the Client’s ongoing objectives. The contract covers the scope for the provision of all catering services, which also includes all hospitality and free issue requirements. The contract being offered will commence on 1st April 2024 for 3 years, with the potential to extend for up to a further 3 years and will be on a guaranteed performance basis. The tender project is seeking to appoint a Contractor whose initiative and innovation will be welcomed for the provision of all catering services within the Foundation. The high-quality service levels proposed, should maintain excellent standards throughout, resulting in a new food service offer with consistent high standards of food operations across both Schools. Regular customer and parental engagement (using digital platforms and social media) will be required to ensure this is the case moving into the contract term. These new standards of operation should meet the needs of the pupil’s moving forwards into this contract term. The current range of foods needs to be expanded along with the service provision. It is one of the objectives of this tender that the successful contractor will utilise a truly local supply chain to source all fresh produce, namely being: Bakery Products Meat Fruit and Vegetables Dairy Products The Supplier will be expected to introduce exciting new food concepts in partnership with the Client for the future. The proposed food concept should create an improved ambiance within the dining rooms and a more pleasant dining experience for both the students and staff. It is the expectation that the menus for both the Primary and Secondary Students will support and encourage uptake of the catering service. Page 6 to 11 The Client has taken the decision that all meat served will be certified by the Halal Monitoring Committee (HMC UK). The Halal Monitoring Committee is an independent, not for profit, registered charity organisation whose main aim is to certify the production of genuine Halal food. HMC complies with the UK Laws for food production, as well as Islamic dietary compliance Laws. HMC promotes animal welfare, issues of food safety, hygiene and quality in compliance with UK Law and within the teachings of the Islamic faith. HMC works with companies who are involved in the production and supply of Halal food, to independently certify all products to provide assurance to the Muslim community that all food meets the high standards of Halal. The terms and conditions of employment and recognition offered to the catering operatives should be both progressive and forward thinking ensuring that the staffing establishment is complete at all times and staff turnover is kept to a minimum. The current cost of the contract including all UFSM’s and FSMs is circa £380.000.00 plus VAT per annum. Please see SQ document for more information.",
+        "new": "The successful Supplier will be required to provide Catering services for Waverley Education Foundation and Al-Furqan Primary School. Waverley School is larger than the average-sized school. It is an all through school for pupils aged 4-19 currently there are circa 1,800 pupils on role and within Waverley Studio College a further 200 pupils. Waverley School moved into a brand-new purpose-built facility in 2013 and has continued to thrive. It is the Executive Principal’s and the Trustee’s aim to continue to build on this and wish to employ a suitably skilled, flexible and experienced catering contractor who will recognise the changes that have taken place over the past few years, providing advice, innovation and expertise. This will be a major benefit to the school and will contribute significantly towards the Client’s ongoing objectives. Al-Furqan Primary School currently has approximately 630 pupils on roll. The schools firmly believe that with improved choice and quality there is a real opportunity to increase this level of uptake. Parents are committed to taking up the service as long as the quality improves, and it is seen as a Value for Money offer. The contract covers the scope for the provision of all catering services, which also includes all hospitality and free issue requirements. The contract being offered will commence on 1st April 2024 for 3 years, with the potential to extend for up to a further 3 years, and will be on a guaranteed performance basis. The tender project is seeking to appoint a Contractor whose initiative and innovation will be welcomed for the provision of all catering services within the Foundation and at Al-Furqan Primary School (Please note separate contractors might be chosen). The high-quality service levels proposed, should maintain excellent standards throughout, resulting in a new food service offer with consistent high standards of food operations across both Schools. Regular customer and parental engagement (using digital platforms and social media) will be required to ensure this is the case moving into the contract term. These new standards of operation should meet the needs of the pupil’s moving forwards into this contract term. The current range of foods needs to be expanded along with the service provision. It is one of the objectives of this tender that the successful contractor will utilise a truly local supply chain to source all fresh produce, namely being: Bakery Products Meat (Please see below all meat supplied within this contract must HMC halal) Fruit and Vegetables Dairy Products The Supplier will be expected to introduce exciting new food concepts in partnership with the Client for the future. The proposed food concept should create an improved ambiance within the dining rooms and a more pleasant dining experience for both the students and staff. It is the expectation that the menus for both the Primary and Secondary Students will support and encourage uptake of the catering service. The Client’s have taken the decision that all meat served will be certified by the Halal Monitoring Committee (HMC UK). The Halal Monitoring Committee is an independent, not for profit, registered charity organisation whose main aim is to certify the production of genuine Halal food. HMC complies with the UK Laws for food production, as well as Islamic dietary compliance Laws. HMC promotes animal welfare, issues of food safety, hygiene and quality in compliance with UK Law and within the teachings of the Islamic faith. HMC works with companies who are involved in the production and supply of Halal food, to independently certify all products to provide assurance to the Muslim community that all food meets the high standards of Halal. The terms and conditions of employment and recognition offered to the catering operatives should be both progressive and forward thinking with emphasis on performance management and training requirements ensuring that the staffing establishment is complete at all times and staff turnover is kept to a minimum. The current cost of the contract including all UFSM’s and FSMs is circa £380.000.00 plus VAT per annum for Waverley School and Studio College and at Al-Furqan Primary School circa £176,000.00 per annum. Please see SQ document for more information."
+      },
+      {
+        "where": "II.1",
+        "lot": "",
+        "label": "II.1.4",
+        "old": "The successful Supplier will be required to provide Catering services for Waverley Education Foundation.",
+        "new": "The successful Supplier will be required to provide Catering services for Waverley Education Foundation and Al-Furqan Primary School."
+      }
+    ]
+  },
+  "026382-2023": {
+    "filename": "026382-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%206th%20September%202023.zip",
+    "sha256": "23d9dc0e1a73232c639b1bd43105611d4e14529b1646baab16a65a960d776601",
+    "url": "https://www.find-tender.service.gov.uk/Notice/026382-2023",
+    "form": "F02_2014",
+    "title": "T23-065ENV Provision of Materials Processing Services for Recycling of Source Segregated Materials Collected from Recycling Centres and Recycling Points",
+    "sector": "Refuse and waste related services Paper collecting services Refuse recycling services Wood Plasterboard works",
+    "submission": "2023-10-13",
+    "opening": "2023-10-13",
+    "dispatch": "2023-09-06",
+    "original_reference": "",
+    "changes": []
+  },
+  "029938-2023": {
+    "filename": "029938-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2011th%20October%202023.zip",
+    "sha256": "f70ffb10ab0ee4b05a514ff8720456c62b8472d79c1247dd5669586d9b4a521c",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029938-2023",
+    "form": "F14_2014",
+    "title": "T23-065ENV Provision of Materials Processing Services for Recycling of Source Segregated Materials Collected from Recycling Centres and Recycling Points",
+    "sector": "Refuse and waste related services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-11",
+    "original_reference": "2023/S 000-026382",
+    "changes": [
+      {
+        "where": "IV.2.2)",
+        "lot": "",
+        "label": "",
+        "old": "2023-10-13 \n           12:00",
+        "new": "2023-10-27 \n           12:00"
+      }
+    ]
+  },
+  "026609-2023": {
+    "filename": "026609-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%208th%20September%202023.zip",
+    "sha256": "4a7ea0c44fe4764c93451ef513b0d991666ea14bb6c989372cff137c95febb38",
+    "url": "https://www.find-tender.service.gov.uk/Notice/026609-2023",
+    "form": "F02_2014",
+    "title": "UKRI-3103 DQW Warm Magnetic Shields (WMS)",
+    "sector": "Laboratory, optical and precision equipments (excl. glasses)",
+    "submission": "2023-10-13",
+    "opening": "2023-10-13",
+    "dispatch": "2023-09-08",
+    "original_reference": "",
+    "changes": []
+  },
+  "030040-2023": {
+    "filename": "030040-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2011th%20October%202023.zip",
+    "sha256": "3ad7740a38045d2aa194bcff552a22c74e41f321c458d1621c8dc909f21642c7",
+    "url": "https://www.find-tender.service.gov.uk/Notice/030040-2023",
+    "form": "F14_2014",
+    "title": "UKRI-3103 DQW Warm Magnetic Shields (WMS)",
+    "sector": "Laboratory, optical and precision equipments (excl. glasses)",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-11",
+    "original_reference": "2023/S 000-026609",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit for receipt of tenders or requests to participate",
+        "old": "2023-10-13 \n           14:00",
+        "new": "2023-10-17 \n           14:00"
+      },
+      {
+        "where": "IV.2.7",
+        "lot": "",
+        "label": "Conditions for opening of tenders",
+        "old": "2023-10-13 \n           14:00",
+        "new": "2023-10-17 \n           14:00"
+      }
+    ]
+  },
+  "027235-2023": {
+    "filename": "027235-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%2014th%20September%202023.zip",
+    "sha256": "de8dd1d05c04c6794d06ce78e2c56b19b5a32710f12db5d901707db716edeed6",
+    "url": "https://www.find-tender.service.gov.uk/Notice/027235-2023",
+    "form": "F02_2014",
+    "title": "The Provision of Building Trades and Drivers Agency Services",
+    "sector": "Recruitment services",
+    "submission": "2023-10-17",
+    "opening": "2023-10-17",
+    "dispatch": "2023-09-14",
+    "original_reference": "",
+    "changes": []
+  },
+  "030095-2023": {
+    "filename": "030095-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2012th%20October%202023.zip",
+    "sha256": "ba2e0abffd36ab77909a3b7dd2d4c2881e867500e88dc7cbce9b356ec6d9d96e",
+    "url": "https://www.find-tender.service.gov.uk/Notice/030095-2023",
+    "form": "F14_2014",
+    "title": "The Provision of Building Trades and Drivers Agency Services",
+    "sector": "Recruitment services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-12",
+    "original_reference": "2023/S 000-027235",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit",
+        "old": "2023-10-17 \n           12:00",
+        "new": "2023-10-24 \n           12:00"
+      },
+      {
+        "where": "IV.2.7",
+        "lot": "",
+        "label": "Conditions for opening of tenders",
+        "old": "2023-10-17 \n           12:00",
+        "new": "2023-10-24 \n           12:00"
+      }
+    ]
+  },
+  "026835-2023": {
+    "filename": "026835-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%2011th%20September%202023.zip",
+    "sha256": "7134a86fb39547019a33f0cdc8661167bc364263624b98ae7a634c6e9c441d71",
+    "url": "https://www.find-tender.service.gov.uk/Notice/026835-2023",
+    "form": "F02_2014",
+    "title": "Travel Management Services",
+    "sector": "Travel agency and similar services Transport agency services",
+    "submission": "2023-10-08",
+    "opening": "2023-10-09",
+    "dispatch": "2023-09-11",
+    "original_reference": "",
+    "changes": []
+  },
+  "030137-2023": {
+    "filename": "030137-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2012th%20October%202023.zip",
+    "sha256": "11ae84b6a13614aa3804ce338c78d5f2938ef7fc5708b003ce8b9db225a43d1b",
+    "url": "https://www.find-tender.service.gov.uk/Notice/030137-2023",
+    "form": "F14_2014",
+    "title": "Travel Management Services",
+    "sector": "Travel agency and similar services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-12",
+    "original_reference": "2023/S 000-026835",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit for receipt of tenders",
+        "old": "2023-10-08 \n           23:59",
+        "new": "2023-10-15 \n           23:59"
+      }
+    ]
+  },
+  "027979-2023": {
+    "filename": "027979-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%2022nd%20September%202023.zip",
+    "sha256": "a4c8e285c53ee2d8a4e60b5489ed362b7c5e395aaff3b000bc3c7a65ecf37778",
+    "url": "https://www.find-tender.service.gov.uk/Notice/027979-2023",
+    "form": "F02_2014",
+    "title": "Security Services and Cash Collection",
+    "sector": "Security services Guard services Patrol services Event services",
+    "submission": "2023-10-23",
+    "opening": "2023-10-23",
+    "dispatch": "2023-09-22",
+    "original_reference": "",
+    "changes": []
+  },
+  "030154-2023": {
+    "filename": "030154-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2012th%20October%202023.zip",
+    "sha256": "8e70a60837744ef5f09633e7572476b95b1c03ea30d7496445ba5842e6a7c2f9",
+    "url": "https://www.find-tender.service.gov.uk/Notice/030154-2023",
+    "form": "F14_2014",
+    "title": "Security Services and Cash Collection",
+    "sector": "Security services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-12",
+    "original_reference": "2023/S 000-027979",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit",
+        "old": "2023-10-23 \n           12:00",
+        "new": "2023-10-30 \n           12:00"
+      },
+      {
+        "where": "IV.2.6",
+        "lot": "",
+        "label": "Minimum time frame during which the tenderer must maintain the tender",
+        "old": "2024-05-10",
+        "new": "2024-05-10"
+      },
+      {
+        "where": "IV.2.7",
+        "lot": "",
+        "label": "Conditions for opening of tenders",
+        "old": "2023-10-23 \n           12:00",
+        "new": "2023-10-30 \n           12:00"
+      }
+    ]
+  },
+  "029731-2023": {
+    "filename": "029731-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%209th%20October%202023.zip",
+    "sha256": "e9f276be9318a1c0dc27bf00d60598e98dd9eb54956ad2e49500177f0d3bd97d",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029731-2023",
+    "form": "F02_2014",
+    "title": "Discharge to Assess  Block Bed Contract",
+    "sector": "Social work and related services Health and social work services",
+    "submission": "2023-11-08",
+    "opening": "2023-11-08",
+    "dispatch": "2023-10-09",
+    "original_reference": "",
+    "changes": []
+  },
+  "030252-2023": {
+    "filename": "030252-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2013th%20October%202023.zip",
+    "sha256": "c7c76e299d954b18f8e9987cb79ddb83eff5d97ae77a95266fd4de98041719d3",
+    "url": "https://www.find-tender.service.gov.uk/Notice/030252-2023",
+    "form": "F14_2014",
+    "title": "Discharge to Assess  Block Bed Contract",
+    "sector": "Social work and related services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-13",
+    "original_reference": "2023/S 000-029731",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "",
+        "old": "2023-11-08 \n           12:00",
+        "new": "2023-10-23 \n           12:00"
+      }
+    ]
+  },
+  "028282-2023": {
+    "filename": "028282-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-09/UK%20Public%20Procurement%20Notices%20-%2026th%20September%202023.zip",
+    "sha256": "8a38714ec4046d827d0480ac7bc50a8b8e726b50729da52084ac261dba3aac9d",
+    "url": "https://www.find-tender.service.gov.uk/Notice/028282-2023",
+    "form": "F02_2014",
+    "title": "Ceredigion Tree Works Framework 2023",
+    "sector": "Tree-maintenance services Tree-clearing services Tree-cutting services Tree seeding Forestry services",
+    "submission": "2023-10-26",
+    "opening": "2023-10-26",
+    "dispatch": "2023-09-26",
+    "original_reference": "",
+    "changes": []
+  },
+  "030358-2023": {
+    "filename": "030358-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2013th%20October%202023.zip",
+    "sha256": "81615a602a7e1e8287b938bd3d8ac22a0f21438ec32d2cee68b843c16681cef9",
+    "url": "https://www.find-tender.service.gov.uk/Notice/030358-2023",
+    "form": "F14_2014",
+    "title": "Ceredigion Tree Works Framework 2023",
+    "sector": "Tree-maintenance services",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-13",
+    "original_reference": "2023/S 000-028282",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit",
+        "old": "2023-10-26 \n           12:00",
+        "new": "2023-11-09 \n           12:00"
+      },
+      {
+        "where": "IV.2.7",
+        "lot": "",
+        "label": "Conditions for opening of tenders",
+        "old": "2023-10-26 \n           12:00",
+        "new": "2023-11-09 \n           12:00"
+      }
+    ]
+  },
+  "029613-2023": {
+    "filename": "029613-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%206th%20October%202023.zip",
+    "sha256": "740cfab9f7d8cbd2a071ea59adae7a4f57fcc2daf7b624a4ad8cc4795ab60b2e",
+    "url": "https://www.find-tender.service.gov.uk/Notice/029613-2023",
+    "form": "F02_2014",
+    "title": "Computer Aided Dispatch System (CAD) for Northern Ireland Ambulance Service (NIAS)",
+    "sector": "IT services: consulting, software development, Internet and support Software programming and consultancy services Data services Computer network services Programming services of packaged software products Custom software development services Software-related services System and support services",
+    "submission": "2023-11-06",
+    "opening": "2023-11-06",
+    "dispatch": "2023-10-06",
+    "original_reference": "",
+    "changes": []
+  },
+  "030561-2023": {
+    "filename": "030561-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2017th%20October%202023.zip",
+    "sha256": "4c0af471477967e6ad73b7bf535c9a3b5abb9fcd65aee799a135afbbf3717961",
+    "url": "https://www.find-tender.service.gov.uk/Notice/030561-2023",
+    "form": "F14_2014",
+    "title": "Computer Aided Dispatch System (CAD) for Northern Ireland Ambulance Service (NIAS)",
+    "sector": "IT services: consulting, software development, Internet and support",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-17",
+    "original_reference": "2023/S 000-029613",
+    "changes": [
+      {
+        "where": "IV.2.2)",
+        "lot": "",
+        "label": "",
+        "old": "2023-11-06 \n           15:00",
+        "new": "2023-11-20 \n           15:00"
+      },
+      {
+        "where": "IV.2.7)",
+        "lot": "",
+        "label": "",
+        "old": "2023-11-06 \n           15:30",
+        "new": "2023-11-20 \n           15:30"
+      }
+    ]
+  },
+  "031065-2023": {
+    "filename": "031065-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2020th%20October%202023.zip",
+    "sha256": "1bb429730979d845afa2825e7d342fccca7e8261b9af201cbd41509061dde077",
+    "url": "https://www.find-tender.service.gov.uk/Notice/031065-2023",
+    "form": "F02_2014",
+    "title": "Small Works Build Higher Framework",
+    "sector": "Refurbishment work Building completion work Excavating and earthmoving work Mechanical installations Electrical installation work",
+    "submission": "2023-11-20",
+    "opening": "",
+    "dispatch": "2023-10-20",
+    "original_reference": "",
+    "changes": []
+  },
+  "031188-2023": {
+    "filename": "031188-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2023rd%20October%202023.zip",
+    "sha256": "509051f19496635859acba4135f24c129d4cdb276e06639462ba5ab26338e928",
+    "url": "https://www.find-tender.service.gov.uk/Notice/031188-2023",
+    "form": "F14_2014",
+    "title": "Small Works Build Higher Framework",
+    "sector": "Refurbishment work",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-23",
+    "original_reference": "2023/S 000-031065",
+    "changes": [
+      {
+        "where": "SQ Questionnaire",
+        "lot": "ALL Lots",
+        "label": "SQ Questionnaire",
+        "old": "Question 1:  a) Employer's (Compulsory) Liability Insurance - £10,000,000 (10 milliion pounds)Question 2:  b) Public Liability Insurance - £10,000,000 (10 million pounds)Question 3:  c) Professional Indemnity Insurance - £10,000,000 (10 million pounds)Question 81: 7.1 Insurance.  Please confirm whether you already have, or can commit to obtain, prior to the commencement of the contract, the levels of insurance cover indicated below:  Employer's (Compulsory) Liability Insurance = £10,000,000.00Question 82: Please self-certify whether you already have, or commit to obtain, prior to the commencement of the contract, the levels of insurance cover indicated below: Public Liability Insurance = £10,000,000.00Question 83: Please certifiy whether you already have , or can commit to obtain, prior ot the commencement of the contract the levels of insurance cover indicated below: Professional Indemnity Insurance = £10,000,000.00Question 84: Please self-certifiy whether you already have, or can commit to obtain, prior to the commencement of the contract the levels of insurance cover indicated below: Product Liability Insurance = £10,000,000.00",
+        "new": "Question 1:  a) Employer's (Compulsory) Liability Insurance - £5,000,000 (5 milliion pounds)Question 2:  b) Public Liability Insurance - £5,000,000 (5 million pounds)Question 3:  c) Professional Indemnity Insurance - £5,000,000 (5 million pounds)Question 81: 7.1 Insurance.  Please confirm whether you already have, or can commit to obtain, prior to the commencement of the contract, the levels of insurance cover indicated below:  Employer's (Compulsory) Liability Insurance = £5,000,000.00Question 82: Please self-certify whether you already have, or commit to obtain, prior to the commencement of the contract, the levels of insurance cover indicated below: Public Liability Insurance = £5,000,000.00Question 83: Please certifiy whether you already have , or can commit to obtain, prior ot the commencement of the contract the levels of insurance cover indicated below: Professional Indemnity Insurance = £5,000,000.00Question 84: Please self-certifiy whether you already have, or can commit to obtain, prior to the commencement of the contract the levels of insurance cover indicated below: Product Liability Insurance = £5,000,000.00"
+      }
+    ]
+  },
+  "031292-2023": {
+    "filename": "031292-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2024th%20October%202023.zip",
+    "sha256": "1692f416eedee13e629984c74f2d9ad64b62e5c91151a00bf22e25146038de15",
+    "url": "https://www.find-tender.service.gov.uk/Notice/031292-2023",
+    "form": "F02_2014",
+    "title": "NHS Branded Medicines Framework for North of England and Midlands and East of England - 1 March 2024",
+    "sector": "Pharmaceutical products",
+    "submission": "2023-11-24",
+    "opening": "2023-11-24",
+    "dispatch": "2023-10-24",
+    "original_reference": "",
+    "changes": []
+  },
+  "031307-2023": {
+    "filename": "031307-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2024th%20October%202023.zip",
+    "sha256": "fff1deff771963751b604c163e5432d409183797339137773e615700af70d0ef",
+    "url": "https://www.find-tender.service.gov.uk/Notice/031307-2023",
+    "form": "F14_2014",
+    "title": "NHS Branded Medicines Framework for North of England and Midlands and East of England - 1 March 2024",
+    "sector": "Pharmaceutical products",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-24",
+    "original_reference": "2023/S 000-031292",
+    "changes": [
+      {
+        "where": "II.2.7.4",
+        "lot": "",
+        "label": "",
+        "old": "2025-08-01",
+        "new": "2026-08-01"
+      },
+      {
+        "where": "IV.2.2.1",
+        "lot": "",
+        "label": "",
+        "old": "2023-11-24 \n           13:00",
+        "new": "2023-11-23 \n           13:00"
+      },
+      {
+        "where": "IV.2.7.1",
+        "lot": "",
+        "label": "",
+        "old": "2023-11-24 \n           13:00",
+        "new": "2023-10-23 \n           13:00"
+      },
+      {
+        "where": "IV.2.6.1",
+        "lot": "",
+        "label": "",
+        "old": "2024-02-22",
+        "new": "2023-10-21"
+      }
+    ]
+  },
+  "030166-2023": {
+    "filename": "030166-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2012th%20October%202023.zip",
+    "sha256": "59036e3691faa498974e7e070f2c0a92276f1fb891bb2a3447a641f744679945",
+    "url": "https://www.find-tender.service.gov.uk/Notice/030166-2023",
+    "form": "F02_2014",
+    "title": "Supply of Vessel",
+    "sector": "Ships and boats Ferry boats Ships and similar vessels for the transport of persons or goods",
+    "submission": "2023-11-15",
+    "opening": "2023-11-15",
+    "dispatch": "2023-10-12",
+    "original_reference": "",
+    "changes": []
+  },
+  "031747-2023": {
+    "filename": "031747-2023.xml",
+    "archive": "https://cdp-sirsi-production-fts-471112843276.s3.eu-west-2.amazonaws.com/Harvester/2023-10/UK%20Public%20Procurement%20Notices%20-%2027th%20October%202023.zip",
+    "sha256": "3d0ae217db1bcbef1d429213dd6e8dc0174d3abe901cb68405e7445c82c7d687",
+    "url": "https://www.find-tender.service.gov.uk/Notice/031747-2023",
+    "form": "F14_2014",
+    "title": "Supply of Vessel",
+    "sector": "Ships and boats",
+    "submission": "",
+    "opening": "",
+    "dispatch": "2023-10-27",
+    "original_reference": "2023/S 000-030166",
+    "changes": [
+      {
+        "where": "IV.2.2",
+        "lot": "",
+        "label": "Time limit",
+        "old": "2023-11-15 \n           12:00",
+        "new": "2023-11-22 \n           12:00"
+      },
+      {
+        "where": "IV.2.7",
+        "lot": "",
+        "label": "Conditions for opening of tenders",
+        "old": "2023-11-15 \n           12:00",
+        "new": "2023-11-22 \n           12:00"
+      }
+    ]
+  }
+}
