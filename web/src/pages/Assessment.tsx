@@ -300,7 +300,13 @@ function Evidence({ r, busy, answer, setAnswer, reason, setReason, onAnswer, onC
 }) {
   const own = r.citations.find((c: any) => c.quote === r.quote);
   const extra = r.citations.filter((c: any) => c.quote !== r.quote);
-  const consulted = (r.retrieval ?? []).filter((x: any) => x.why?.some((w: string) => /refers to|defined term|second search/.test(w)));
+  const traces = new Map<number, any>();
+  for (const entry of r.retrieval ?? []) {
+    if (entry.method !== "VersionRAG") continue;
+    const previous = traces.get(entry.passage_id);
+    traces.set(entry.passage_id, { ...entry, why: [...new Set([...(previous?.why ?? []), ...entry.why])] });
+  }
+  const consulted = traces.size ? Array.from(traces.values()) : (r.retrieval ?? []).filter((x: any) => x.why?.some((w: string) => /refers to|defined term|second search/.test(w)));
   const step = nextStep(r);
   const steps = howChecked(r);
   return (
@@ -366,10 +372,14 @@ function Evidence({ r, busy, answer, setAnswer, reason, setReason, onAnswer, onC
 
       {(consulted.length > 0 || steps.length > 0) && <details className="more">
         <summary>Documents consulted and how</summary>
-        {consulted.map((x: any, i: number) => <button key={i} className="link-row" onClick={() => onSource({ passage_id: x.passage_id, page: x.page })}>
+        {consulted.map((x: any, i: number) => <div key={i}><button className="link-row" onClick={() => onSource({ passage_id: x.passage_id, page: x.page })}>
           <strong>{x.document}{x.section ? ` · ${x.section}` : ""}{x.page ? ` · p.${x.page}` : ""}</strong>
-          <span className="small muted">Retrieved because {x.why.find((w: string) => /refers to|defined term|second search/.test(w))}.</span>
-        </button>)}
+          <span className="small muted">{x.method === "VersionRAG"
+            ? [x.release_id, ...x.why].join(" · ")
+            : "Retrieved because " + x.why.find((w: string) => /refers to|defined term|second search/.test(w)) + "."}</span>
+        </button>{x.prior_passage_id && <button className="btn sm" onClick={() => onSource({ passage_id: x.prior_passage_id })}>
+          Compare earlier passage
+        </button>}</div>)}
         {r.reference_gaps?.length > 0 && <div className="small">Could not be read: {r.reference_gaps.join(", ")}.</div>}
         {steps.length > 0 && <ol className="checks">{steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
       </details>}

@@ -13,9 +13,12 @@ class PipelineConfig:
     graph: bool = True       # follow references and definitions the requirement names
     corrective: bool = True  # search again for unresolved references, and abstain when evidence stays insufficient
 
+    versionrag: bool = False
+
 
 # Experiment arms. Each is reachable from a setting; none has been shown to beat another until an experiment says so.
 BASELINES = {
+    "VersionRAG": PipelineConfig("VersionRAG", versionrag=True),
     "B0": PipelineConfig("B0", rules=False, guard=False, graph=False, corrective=False),
     "B1": PipelineConfig("B1", graph=False, corrective=False),
     "B2": PipelineConfig("B2", graph=False),

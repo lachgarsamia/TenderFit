@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from psycopg.types.json import Jsonb
 from pydantic import ValidationError
 
-from tenderfit.assessment.config import PipelineConfig
+from tenderfit.assessment.config import BASELINES, PipelineConfig
 from tenderfit.assessment.confirm import overrides
 from tenderfit.assessment.contradiction import find_conflicts
 from tenderfit.assessment.prompts import VERDICT_SCHEMA, VERDICT_SYSTEM, VERDICT_VERSION, verdict_user
@@ -20,7 +20,7 @@ from tenderfit.documents.text import normalise, quote_ok
 from tenderfit.extraction.extract import extract_version
 from tenderfit.llm import LLM, LLMError, log_call
 from tenderfit.profile.validity import check
-from tenderfit.retrieval import graph
+from tenderfit.retrieval import graph, versioned
 from tenderfit.retrieval.search import Embedder, Reranker, corrective_query, index_version, search
 from tenderfit.rules import aggregate as agg
 from tenderfit.rules.engine import MET, NEEDS, NOT_MET, UNKNOWN, Condition, Context, Fact, Outcome, RuleResult, evaluate
@@ -70,13 +70,17 @@ def load_facts(conn: Conn, profile_id: int, lot_id: int, version_id: int | None 
             for r in conn.execute("SELECT * FROM profile_fact WHERE profile_id = %s ORDER BY id", (profile_id,))]
 
 
-def lot_context(conn: Conn, lot_id: int, today: date) -> tuple[dict, Context]:
+def lot_context(conn: Conn, lot_id: int, today: date, snapshot: int | None = None, *, frozen: bool = False) -> tuple[dict, Context]:
     row = must(conn.execute(
         """SELECT l.*, o.ocid, o.regions AS opp_regions, o.cpv_codes AS opp_cpv, o.current_version_id, nv.fields
            FROM lot l JOIN opportunity o ON o.id = l.opportunity_id
-           JOIN notice_version nv ON nv.id = o.current_version_id WHERE l.id = %s""", (lot_id,)).fetchone())
+           JOIN notice_version nv ON nv.id = coalesce(%s, o.current_version_id) AND nv.opportunity_id = o.id WHERE l.id = %s""", (snapshot, lot_id)).fetchone())
     f = row["fields"]
     lf: dict = next((x for x in f["lots"] if x["id"] == row["lot_no"]), {})
+    if frozen or snapshot is not None:
+        if not lf:
+            raise ValueError("lot missing from requested notice version")
+        row.update(quantity=lf.get("quantity"), opp_cpv=f.get("cpv", []), opp_regions=f.get("regions", []))
     deadline = datetime.fromisoformat(f["deadline"]).astimezone(LONDON).date() if f.get("deadline") else None
     period = lf.get("contract_period") or {}
     contract_end = period.get("endDate")
@@ -255,7 +259,7 @@ def _combine(d: Decision, results: list[ConditionResult]) -> Decision:
 
 def _model_decision(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Context, llm: LLM, budget_left: float,
                     emb, rr, config: PipelineConfig, profile_id: int | None, escalate: list[str], labels: set[str],
-                    open_conditions: list[str]) -> Decision:
+                    open_conditions: list[str], paths: versioned.EvidencePaths | None = None) -> Decision:
     rel = relevant_facts(facts, req["category"]) if config.rules else facts
     answers = [r["answer"] for r in conn.execute(
         """SELECT answer FROM question WHERE requirement_id = ANY(%s) AND answer IS NOT NULL
@@ -264,7 +268,7 @@ def _model_decision(conn: Conn, version_id: int, req: dict, facts: list[Fact], c
         return Decision(UNKNOWN, "no fact in your profile bears on this, so it was not sent for interpretation", "guard",
                         citations=[(req["passage_id"], req["quote"])], escalate=escalate + ["no relevant fact"],
                         question=f"Do you have evidence for: {req['statement']}?")
-    links = graph.expand(conn, req["passage_id"], labels, profile_id) if config.graph else []
+    links = paths.links if paths is not None else graph.expand(conn, req["passage_id"], labels, profile_id) if config.graph else []
     query = f"{req['statement']}\n{req['quote']}"
     hits = search(conn, version_id, query, k=5, emb=emb, rr=rr, hybrid=config.hybrid, profile_id=profile_id, graph_links=links)
     floor = settings.retrieval_min_score
@@ -327,6 +331,7 @@ def decide(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Conte
     # A reference in this requirement's own words, not any reference elsewhere in a long passage.
     labels = {r.label for r in references.find(req["quote"]) if r.kind != "named"} | set(req.get("refs") or []) | set(req.get("defined_terms") or [])
     escalate = ["unresolved cross-reference in the source passage"] if source and references.has_unresolved_cue(req["quote"]) else []
+    paths = versioned.resolve(conn, version_id, req["passage_id"], labels, profile_id) if config.versionrag else None
     results = _rule_outcomes(conn, req, facts, ctx, config)
     open_results = [c for c in results if not c.rule and c.mandatory]
     if any(c.rule for c in results) and not open_results:
@@ -341,7 +346,7 @@ def decide(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Conte
                 d.reason = f"{d.reason}. You answered: \"{answered['answer'][:200]}\". This is on record as a declaration; add a document to prove it."
     else:
         labels_open = [c.label for c in open_results] if len(results) > 1 else []
-        d = _model_decision(conn, version_id, req, facts, ctx, llm, budget_left, emb, rr, config, profile_id, escalate, labels, labels_open)
+        d = _model_decision(conn, version_id, req, facts, ctx, llm, budget_left, emb, rr, config, profile_id, escalate, labels, labels_open, paths)
         d = _combine(d, results)
     if config.rules:
         d.params = list(dict.fromkeys(d.params + [p for c in results if c.rule for p in c.rule.params]))
@@ -352,6 +357,18 @@ def decide(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Conte
     if config.corrective:
         _apply_gaps(conn, version_id, req, d, labels, profile_id)
         _apply_conflicts(conn, version_id, req, d, profile_id)
+    if paths is not None:
+        d.reads.extend(entry["passage_id"] for entry in d.retrieval)
+        d.reads.extend(link["id"] for link in paths.links)
+        d.retrieval.extend({"passage_id": link["id"], "path": link["path"], "why": [" → ".join(link["steps"])]}
+                           for link in paths.links)
+        d.retrieval.append({"passage_id": req["passage_id"], "why": ["requirement source"]})
+        d.retrieval = versioned.provenance(conn, version_id, profile_id, d.retrieval)
+        d.gaps = sorted(set(d.gaps + paths.gaps))
+        if paths.gaps and d.status == MET:
+            d.status, d.basis, d.needs_human = NEEDS, None, "G5"
+            d.reason += ". Evidence needs review: " + ", ".join(paths.gaps)
+            d.question = "Which passage governs " + ", ".join(paths.gaps) + "?"
     return d
 
 
@@ -419,9 +436,14 @@ def _overridden(req: dict, overridden: dict, lineage: list[int]) -> dict | None:
 
 
 def _carry_verdict(conn: Conn, aid: int, req: dict, old_vid: int, pmap: dict[int, int],
-                   provisional: bool, profile_id: int, version_id: int) -> dict:
+                   provisional: bool, profile_id: int, version_id: int, versionrag: bool = False) -> dict:
     old = must(conn.execute("SELECT * FROM verdict WHERE id = %s", (old_vid,)).fetchone())
     retrieval = [{**r, "passage_id": pmap.get(r.get("passage_id"), r.get("passage_id"))} for r in old["retrieval"]]
+    if versionrag:
+        for entry in retrieval:
+            if "path" in entry:
+                entry["path"] = [pmap.get(pid, pid) for pid in entry["path"]]
+        retrieval = versioned.provenance(conn, version_id, profile_id, retrieval)
     vid = must(conn.execute(
         """INSERT INTO verdict (assessment_id, requirement_id, status, reason, basis, needs_human, provisional, question,
                                 escalate, escalate_reason, decided_by, carried_over, override_status, override_reason, override_by,
@@ -525,7 +547,10 @@ def assess_lot(conn: Conn, lot_id: int, profile_id: int, llm: LLM, today: date |
     and raised again, so the job queue can retry it. `finalise` runs inside the final transaction, so records that
     describe this run (such as a change impact) become visible exactly when the run does."""
     today = today or datetime.now(LONDON).date()
-    lot, ctx = lot_context(conn, lot_id, today)
+    if config is None and settings.versionrag_enabled:
+        config = BASELINES["VersionRAG"]
+    lot, ctx = lot_context(conn, lot_id, today, version_id if config and config.versionrag else None,
+                           frozen=bool(config and config.versionrag))
     version_id = version_id or lot["current_version_id"]
     aid = _begin(conn, lot_id, profile_id, version_id, mode, reason, shadow, job_id)
     stage: dict = {"stage": "documents"}
@@ -599,8 +624,13 @@ def _run(conn: Conn, aid: int, lot: dict, ctx: Context, profile_id: int, llm: LL
     overridden = overrides(conn, profile_id)
     _progress(conn, aid, stage, stage="assessment", done=0, total=len(reqs))
     for done, req in enumerate(reqs, start=1):
-        if req["id"] in carry:
-            old = _carry_verdict(conn, aid, req, carry[req["id"]], pmap, inv["coverage"] != "complete", profile_id, version_id)
+        previous = carry.get(req["id"])
+        if previous and config.versionrag and not versioned.reusable(conn, previous, req, version_id, profile_id, pmap):
+            previous = None
+        if previous and config.versionrag and pmap and find_conflicts(conn, version_id, req["passage_id"], req["quote"], profile_id):
+            previous = None
+        if previous:
+            old = _carry_verdict(conn, aid, req, previous, pmap, inv["coverage"] != "complete", profile_id, version_id, config.versionrag)
             vs.append(agg.V(req["id"], req["statement"], req["obligation"], req["category"],
                             NEEDS if old["status"] == NOT_MET and _overridden(req, overridden, _lineage(conn, req)) else old["status"],
                             old["reason"], _source_label(conn, req), old["question"], old["basis"]))
