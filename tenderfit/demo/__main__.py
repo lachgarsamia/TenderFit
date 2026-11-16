@@ -198,7 +198,10 @@ def reset(conn, a) -> None:
     documents = f"(SELECT id FROM document WHERE version_id IN {versions})"
     passages = f"(SELECT id FROM passage WHERE document_id IN {documents})"
     refs = f"(SELECT id FROM document_ref WHERE version_id IN {versions})"
-    for sql in [f"DELETE FROM agent_step WHERE assessment_id IN {assessments}", f"DELETE FROM change_impact WHERE lot_id IN {lots}",
+    # Simulations first: they point at the lot, its assessments, versions, requirements and verdicts. Their changes,
+    # results and agent trace go with them (ON DELETE CASCADE).
+    for sql in [f"DELETE FROM simulation WHERE lot_id IN {lots}",
+                f"DELETE FROM agent_step WHERE assessment_id IN {assessments}", f"DELETE FROM change_impact WHERE lot_id IN {lots}",
                 "DELETE FROM change_event WHERE opportunity_id = %(o)s",
                 f"DELETE FROM version_preparation WHERE from_version_id IN {versions}",
                 f"DELETE FROM verdict_condition WHERE verdict_id IN {verdicts}", f"DELETE FROM verdict_citation WHERE verdict_id IN {verdicts}",

@@ -173,8 +173,10 @@ class ConditionResult:
     rule: RuleResult | None  # None: this condition must be interpreted
 
 
-def _rule_outcomes(conn: Conn, req: dict, facts: list[Fact], ctx: Context, config: PipelineConfig) -> list[ConditionResult]:
-    rows = conn.execute("SELECT * FROM requirement_condition WHERE requirement_id = %s ORDER BY ordinal", (req["id"],)).fetchall()
+def _rule_outcomes(conn: Conn, req: dict, facts: list[Fact], ctx: Context, config: PipelineConfig,
+                   conditions: list[dict] | None = None) -> list[ConditionResult]:
+    rows = conditions if conditions is not None else conn.execute(
+        "SELECT * FROM requirement_condition WHERE requirement_id = %s ORDER BY ordinal", (req["id"],)).fetchall()
     if not rows:  # requirements extracted before conditions existed
         rows = [{"id": None, "label": req["statement"], "mandatory": True, "condition": req["condition"], "quote": req["quote"]}]
     out = []
@@ -326,13 +328,17 @@ def _model_decision(conn: Conn, version_id: int, req: dict, facts: list[Fact], c
 
 def decide(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Context, llm: LLM,
            budget_left: float, emb: Embedder | None = None, rr: Reranker | None = None,
-           config: PipelineConfig = PipelineConfig("B2"), profile_id: int | None = None) -> Decision:
+           config: PipelineConfig = PipelineConfig("B2"), profile_id: int | None = None, *,
+           conditions: list[dict] | None = None, interpret: bool = True) -> Decision:
+    """conditions: evaluate these condition rows instead of the requirement's stored ones (a simulation's hypothesis).
+    interpret=False never calls the model: a requirement the rules cannot settle is returned decided_by "needs_model",
+    unless a mandatory rule already fails it, which no reading of the other conditions could change."""
     source = conn.execute("SELECT text FROM passage WHERE id = %s", (req["passage_id"],)).fetchone()
     # A reference in this requirement's own words, not any reference elsewhere in a long passage.
     labels = {r.label for r in references.find(req["quote"]) if r.kind != "named"} | set(req.get("refs") or []) | set(req.get("defined_terms") or [])
     escalate = ["unresolved cross-reference in the source passage"] if source and references.has_unresolved_cue(req["quote"]) else []
     paths = versioned.resolve(conn, version_id, req["passage_id"], labels, profile_id) if config.versionrag else None
-    results = _rule_outcomes(conn, req, facts, ctx, config)
+    results = _rule_outcomes(conn, req, facts, ctx, config, conditions)
     open_results = [c for c in results if not c.rule and c.mandatory]
     if any(c.rule for c in results) and not open_results:
         d = _from_rules(req, results, escalate)
@@ -344,6 +350,8 @@ def decide(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Conte
             if answered:  # the answer is on record: do not ask again, and do not treat it as proof
                 d.status, d.question = NEEDS, None
                 d.reason = f"{d.reason}. You answered: \"{answered['answer'][:200]}\". This is on record as a declaration; add a document to prove it."
+    elif not interpret:
+        d = _uninterpreted(req, results, escalate)
     else:
         labels_open = [c.label for c in open_results] if len(results) > 1 else []
         d = _model_decision(conn, version_id, req, facts, ctx, llm, budget_left, emb, rr, config, profile_id, escalate, labels, labels_open, paths)
@@ -354,6 +362,8 @@ def decide(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Conte
                      "reason": c.rule.reason if c.rule else d.reason, "decided_by": "rule" if c.rule else d.decided_by,
                      "required": c.rule.required if c.rule else None, "observed": c.rule.observed if c.rule else None}
                     for c in results if c.id is not None]
+    if d.decided_by == "needs_model":
+        return d
     if config.corrective:
         _apply_gaps(conn, version_id, req, d, labels, profile_id)
         _apply_conflicts(conn, version_id, req, d, profile_id)
@@ -370,6 +380,15 @@ def decide(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Conte
             d.reason += ". Evidence needs review: " + ", ".join(paths.gaps)
             d.question = "Which passage governs " + ", ".join(paths.gaps) + "?"
     return d
+
+
+def _uninterpreted(req: dict, results: list[ConditionResult], escalate: list[str]) -> Decision:
+    if any(rule.status == NOT_MET for _, rule in _settled(results, mandatory_only=True)):
+        d = _from_rules(req, results, escalate)
+        d.reason = f"{d.reason}; the other conditions were not interpreted, and could not change this"
+        return d
+    return Decision(UNKNOWN, "needs the model to interpret; not assessed by rules", "needs_model",
+                    citations=[(req["passage_id"], req["quote"])], escalate=escalate + ["needs model interpretation"])
 
 
 def _apply_gaps(conn: Conn, version_id: int, req: dict, d: Decision, labels: set[str], profile_id: int | None) -> None:
@@ -596,6 +615,20 @@ def _record_verdict_links(conn: Conn, vid: int, req: dict, version_id: int, d: D
                      (vid, req["id"], d.question, profile_id))
 
 
+def lot_dimensions(conn: Conn, version_id: int, profile_id: int, vs: list[agg.V], inv: dict, facts: list[Fact], ctx: Context,
+                   config: PipelineConfig) -> agg.Dimensions:
+    """The recommendation and its dimensions from per-requirement statuses. Reads only."""
+    refs = [agg.Ref(r["label"], r["kind"], r["essential"], r["status"] if config.coverage else "read") for r in inv["documents"]]
+    product_cpv = [c for f in facts if f.attribute == "product" for c in f.value.get("cpv", [])]
+    region: list[str] = next((f.value.get("itl", []) for f in facts if f.attribute == "region"), [])
+    rel = agg.relevance(ctx.fields["lot.cpv"] or [], product_cpv, ctx.fields["lot.regions"] or [], region)
+    rejected = must(conn.execute(
+        """SELECT count(*) n FROM requirement_rejection rj LEFT JOIN passage p ON p.id = rj.passage_id LEFT JOIN document d ON d.id = p.document_id
+           WHERE rj.version_id = %s AND rj.obligation = 'mandatory' AND rj.kind <> 'condition'
+             AND (d.owner_profile_id IS NULL OR d.owner_profile_id = %s)""", (version_id, profile_id)).fetchone())["n"]
+    return agg.dimensions(vs, refs, rel, inv["coverage"], rejected)
+
+
 def _run(conn: Conn, aid: int, lot: dict, ctx: Context, profile_id: int, llm: LLM, http, emb, rr, version_id: int,
          carry: dict[int, int], pmap: dict[int, int], shadow: bool, agent: bool | None, config: PipelineConfig | None,
          stage: dict, finalise: Callable[[int], None] | None) -> None:
@@ -676,15 +709,7 @@ def _run(conn: Conn, aid: int, lot: dict, ctx: Context, profile_id: int, llm: LL
                         _source_label(conn, req), d.question, d.basis))
         _progress(conn, aid, stage, done=done)
     _progress(conn, aid, stage, stage="finalising")
-    refs = [agg.Ref(r["label"], r["kind"], r["essential"], r["status"] if config.coverage else "read") for r in inv["documents"]]
-    product_cpv = [c for f in facts if f.attribute == "product" for c in f.value.get("cpv", [])]
-    region: list[str] = next((f.value.get("itl", []) for f in facts if f.attribute == "region"), [])
-    rel = agg.relevance(ctx.fields["lot.cpv"] or [], product_cpv, ctx.fields["lot.regions"] or [], region)
-    rejected = must(conn.execute(
-        """SELECT count(*) n FROM requirement_rejection rj LEFT JOIN passage p ON p.id = rj.passage_id LEFT JOIN document d ON d.id = p.document_id
-           WHERE rj.version_id = %s AND rj.obligation = 'mandatory' AND rj.kind <> 'condition'
-             AND (d.owner_profile_id IS NULL OR d.owner_profile_id = %s)""", (version_id, profile_id)).fetchone())["n"]
-    dims = agg.dimensions(vs, refs, rel, inv["coverage"], rejected)
+    dims = lot_dimensions(conn, version_id, profile_id, vs, inv, facts, ctx, config)
     # One transaction: the old assessment stops being current exactly when the new one becomes current.
     if not shadow:
         conn.execute("""UPDATE assessment SET superseded = true WHERE lot_id = %s AND profile_id = %s AND status = 'done'
