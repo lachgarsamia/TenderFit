@@ -128,10 +128,14 @@ def test_simulation_state_lives_only_in_simulation_tables(base):
     db.rollback()
 
 
+# The API module that exposes simulations is the one deliberate exception; anything else that imports them fails.
+SIMULATION_ENTRY_POINTS = {"tenderfit/api/simulations.py"}
+
+
 def test_mode_a_code_never_imports_the_simulation_package():
-    offenders = [str(p.relative_to(ROOT)) for p in (ROOT / "tenderfit").rglob("*.py")
-                 if "simulation" not in p.parts and re.search(r"tenderfit\.simulation|from tenderfit import simulation", p.read_text())]
-    assert offenders == []
+    importers = {str(p.relative_to(ROOT)) for p in (ROOT / "tenderfit").rglob("*.py")
+                 if "simulation" not in p.parts and re.search(r"tenderfit\.simulation|from tenderfit import simulation", p.read_text())}
+    assert importers == SIMULATION_ENTRY_POINTS
 
 
 # --- 4. A simulation references the right baseline, version and profile state --------------------------------------------

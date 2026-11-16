@@ -449,3 +449,19 @@ about $0.22 in total.
 **Found by self-review, and fixed:** `python -m tenderfit.demo reset` failed with a foreign-key violation once a demo
 lot had simulations. It now deletes that lot's simulations first; their changes, results and trace cascade with them.
 A regression test reproduced the failure before the fix.
+
+---
+
+## 12. The API (Mode B, phase 1)
+
+Simulations are exposed over HTTP by `tenderfit/api/simulations.py`. It covers listing a lot's simulations, creating
+from a completed assessment, detail, adding a change (all nine kinds), preview, run, results and discard. It's
+synchronous and rules-only, and it has no agent route yet. The module adds no simulation logic: each route makes one call
+into this package, with the supplier taken from the session. Errors map to:
+- 404 for `SimulationNotFound`, so another supplier's simulation looks the same as a missing one;
+- 409 for `SimulationConflict`, the lifecycle errors;
+- 422 for other `SimulationError`s.
+
+It's the only module outside the package that imports it, and the boundary test now names it as the single allowed
+entry point. Nothing promotes a simulation into the live assessment. `docs/SIMULATION_API_PLAN.md` §12 has the routes
+and how they were verified.

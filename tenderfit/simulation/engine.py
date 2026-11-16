@@ -27,7 +27,7 @@ from tenderfit.llm import LLM
 from tenderfit.rules import aggregate as agg
 from tenderfit.rules.engine import NEEDS, NOT_MET, Context
 from tenderfit.simulation import store
-from tenderfit.simulation.changes import SimulationError
+from tenderfit.simulation.changes import SimulationConflict, SimulationError
 from tenderfit.simulation.compare import Row, summarise
 from tenderfit.simulation.impact import reach
 from tenderfit.simulation.isolation import read_only, require_idle
@@ -67,7 +67,7 @@ def run(conn: Conn, profile_id: int, simulation_id: int, config: PipelineConfig 
                WHERE id = %s AND profile_id = %s AND status = 'created' RETURNING id""", (simulation_id, profile_id)).fetchone()
         if not started:
             status = store.get(conn, profile_id, simulation_id)["status"]  # SimulationNotFound for another supplier
-            raise SimulationError(f"a simulation runs once; this one is {status}")
+            raise SimulationConflict(f"a simulation runs once; this one is {status}")
         conn.commit()
     except BaseException:
         conn.rollback()

@@ -25,6 +25,11 @@ class SimulationNotFound(SimulationError):
     """Unknown, or another supplier's: the caller is not told which."""
 
 
+class SimulationConflict(SimulationError):
+    """The request is valid, but not in the simulation's (or its baseline's) current state: it has already run, it is
+    discarded, or the assessment cannot be a baseline. The API answers 409, where other SimulationErrors are 422."""
+
+
 class _Change(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
