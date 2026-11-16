@@ -7,6 +7,9 @@ Three phases, each with its own transaction:
   3. record:    results and completed status in one write transaction, touching only this simulation's rows.
 Any failure after the start marks the simulation failed, with the stage it failed in, and is raised again.
 
+Only requirements a change can reach (impact.reach) are recomputed; every other one keeps its control verdict.
+selective=False recomputes them all and raises if one of those it would have skipped comes out differently.
+
 Evaluation is rules-only: decide(interpret=False) never calls the model, reads no verdict cache and spends nothing. A
 requirement only the model can decide is reported as "needs_model", never guessed."""
 from typing import cast
@@ -16,6 +19,7 @@ from psycopg.types.json import Jsonb
 from tenderfit.assessment.config import BASELINES, PipelineConfig
 from tenderfit.assessment.confirm import overrides
 from tenderfit.assessment.pipeline import Decision, _lineage, _source_label, decide, lot_dimensions
+from tenderfit.changes.impact import load_deps
 from tenderfit.config import settings
 from tenderfit.db import Conn
 from tenderfit.documents import service as docs
@@ -25,6 +29,7 @@ from tenderfit.rules.engine import NEEDS, NOT_MET, Context
 from tenderfit.simulation import store
 from tenderfit.simulation.changes import SimulationError
 from tenderfit.simulation.compare import Row, summarise
+from tenderfit.simulation.impact import reach
 from tenderfit.simulation.isolation import read_only, require_idle
 from tenderfit.simulation.scenario import Scenario, apply_changes
 from tenderfit.simulation.snapshot import Snapshot
@@ -54,7 +59,7 @@ def default_config() -> PipelineConfig:
     return PipelineConfig("B3" if settings.agent_enabled else "B2", agent=settings.agent_enabled)
 
 
-def run(conn: Conn, profile_id: int, simulation_id: int, config: PipelineConfig | None = None) -> dict:
+def run(conn: Conn, profile_id: int, simulation_id: int, config: PipelineConfig | None = None, selective: bool = True) -> dict:
     require_idle(conn)
     try:
         started = conn.execute(
@@ -70,7 +75,7 @@ def run(conn: Conn, profile_id: int, simulation_id: int, config: PipelineConfig 
     stage = "evaluation"
     try:
         with read_only(conn):
-            rows, summary = _evaluate(conn, profile_id, simulation_id, config or default_config())
+            rows, summary = _evaluate(conn, profile_id, simulation_id, config or default_config(), selective)
         stage = "recording"
         _record(conn, simulation_id, rows, summary)
     except BaseException as e:
@@ -104,7 +109,28 @@ def recover_stale_simulations(conn: Conn, minutes: int = STALE_RUNNING_MINUTES) 
     return n
 
 
-def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineConfig) -> tuple[list[Row], dict]:
+def impact(conn: Conn, sim: dict, snap: Snapshot, simulated: Scenario) -> tuple[dict[int, list[dict]], dict[int, list[dict]]]:
+    """(what the hypothesis reaches, what live edits since the baseline reach), per requirement. Reads only."""
+    deps = load_deps(conn, snap.assessment_id)
+    reqs = [{**r, "conditions": r["conditions"] + simulated.requirements[r["id"]]["conditions"]} for r in snap.requirements]
+    facts = snap.facts + [f for f in simulated.facts if f.id < 0]
+    hyp = reach(reqs, simulated.touched, deps, facts)
+    drifted = {("fact", str(f)) for f in sim["drift"].get("facts_changed_since_baseline", [])}
+    stale = reach(reqs, drifted, deps, facts) if drifted else {}
+    return ({rid: [x.json() for x in rs] for rid, rs in hyp.items()},
+            {rid: [x.json() for x in rs] for rid, rs in stale.items()})
+
+
+def preview(conn: Conn, profile_id: int, simulation_id: int) -> dict[int, list[dict]]:
+    """Before running: which requirements the recorded hypothesis can reach, and why. Writes nothing."""
+    with read_only(conn):
+        sim = store.get(conn, profile_id, simulation_id)
+        snap = Snapshot.from_json(sim["snapshot"])
+        return impact(conn, sim, snap, apply_changes(snap, sim["changes"]))[0]
+
+
+def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineConfig,
+              selective: bool = True) -> tuple[list[Row], dict]:
     sim = store.get(conn, profile_id, simulation_id)
     snap = Snapshot.from_json(sim["snapshot"])
     if snap.sha256() != sim["snapshot_sha256"]:
@@ -114,17 +140,22 @@ def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineC
     live = {r["id"]: r for r in conn.execute("SELECT * FROM requirement WHERE id = ANY(%s)",
                                              ([r["id"] for r in snap.requirements],))}
     overridden = overrides(conn, profile_id)
+    reached, stale = impact(conn, sim, snap, simulated)
     rows, vs_control, vs_simulated = [], [], []
     for req in snap.requirements:
         row = live.get(req["id"])
         if row is None:
             raise SimulationError(f"requirement {req['id']} of the baseline no longer exists")
         c = _decide(conn, snap, control, row, config)
-        s = _decide(conn, snap, simulated, row, config)
-        r = Row(req["id"], req["statement"], req["obligation"], req["baseline_verdict_id"], req["baseline_status"], c, s,
-                _touched(simulated, req["id"], c, s))
+        why = reached[req["id"]]
+        s = _decide(conn, snap, simulated, row, config) if why or not selective else c
+        if not why and s != c:
+            raise SimulationError(f"requirement {req['id']} changed although no change reaches it: the dependency analysis is incomplete")
+        r = Row(req["id"], req["statement"], req["obligation"], req["baseline_verdict_id"], req["baseline_status"], c, s, why)
         if simulated.requirements[req["id"]].get("text_changed"):
             r.notes.append("the wording changed: only the model can read new wording")
+        if c is None and stale.get(req["id"]):
+            r.notes.append("baseline may be out of date: " + "; ".join(x["detail"] for x in stale[req["id"]]))
         rows.append(r)
         is_overridden = any(i in overridden for i in _lineage(conn, row))
         label = _source_label(conn, row)
@@ -163,14 +194,6 @@ def _record_of(d: Decision) -> dict:
             "conditions": d.conditions, "gaps": d.gaps, "conflict": d.conflict}
 
 
-def _touched(s: Scenario, rid: int, *records: dict | None) -> bool:
-    """Whether a change reaches this requirement directly, or reaches a fact or field one of its decisions used."""
-    if ("requirement", str(rid)) in s.touched:
-        return True
-    used = {("fact", str(f)) for r in records if r for f in r["facts"]} | {("field", p) for r in records if r for p in r["params"]}
-    return bool(used & s.touched)
-
-
 def _v(req: dict, rec: dict | None, overridden: bool, label: str) -> agg.V:
     """As the live run aggregates: a verdict only the model gave stays as it was, and a recorded override of a not met
     counts as needs confirmation."""
@@ -188,7 +211,7 @@ def _record(conn: Conn, simulation_id: int, rows: list[Row], summary: dict) -> N
                                               simulated_status, how, simulated)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
             (simulation_id, r.requirement_id, r.baseline_verdict_id, r.baseline_status, r.control_status, r.simulated_status,
-             r.how, Jsonb({"simulated": r.simulated, "control": r.control, "touched": r.touched, "effect": r.effect,
+             r.how, Jsonb({"simulated": r.simulated, "control": r.control, "reached": r.reached, "effect": r.effect,
                            "drift": r.drift, "notes": r.notes})))
     done = conn.execute("""UPDATE simulation SET status = 'completed', finished_at = now(), summary = %s
                            WHERE id = %s AND status = 'running' RETURNING id""", (Jsonb(summary), simulation_id)).fetchone()

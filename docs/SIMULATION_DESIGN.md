@@ -330,3 +330,51 @@ computed from the facts and fields the decisions actually used. Stage 6 replaces
 **What a run still reads live** (identical for control and simulated, so it can't create a false effect): the requirement
 row's references and lineage, answered questions, overrides, the document inventory and rejected requirements. These are
 read at run time, not snapshotted, and can differ from what the baseline saw.
+
+---
+
+## 9. Stage 6 as built: dependency-aware impact
+
+**What the audit of the dependency records found.** A verdict records the facts it *used* (`verdict_fact` → `dependency`
+kind `fact`), the fields its rules resolved, and the passages it read. That's necessary but not sufficient for "what can
+change this verdict":
+- a rule condition on `capacity.lead_days` selects among **every** capacity fact (`rules.engine._select`), so a fact it
+  set aside, or one that doesn't exist yet, leaves no record;
+- every selected fact's validity is measured at the **deadline** (`profile.validity.check`), but the deadline is recorded
+  only when the fact that was used has an expiry date.
+
+On the fixture, the BS EN 1729-2 verdict recorded only test report 10 (evidence `missing`). Adding a new test report
+changes that verdict, and no recorded dependency points to it.
+
+**Design (`tenderfit/simulation/impact.py`, pure).** Each requirement's reach has two sources, and both are reported:
+- `used`: the baseline's recorded dependency (`changes.impact.load_deps`). This is the explanation in the supplier's terms.
+- `examines`: derived from the conditions themselves. For a rule condition, that's the fact attribute, `notice.deadline`,
+  any `lot.`/`notice.` field named in `bound`/`anchor`/`min_units`, and the field defaults for `region_covered` /
+  `within_years`. For a requirement only the model can read, it's its category's facts (`pipeline.CATEGORY_FACTS`, or all
+  of them for `other`) and the deadline.
+- `direct`: the hypothesis changes the requirement's own conditions or wording.
+
+The union is a superset of what `decide()` reads on the rule path, so it's sound by construction for these change kinds.
+
+**Engine.** `run(selective=True)` computes control for every requirement, and simulated only for those reached. An
+unreached requirement is `how = "not_affected"` and its simulated verdict is its control verdict. `run(selective=False)`
+recomputes everything and **fails the run** if an unreached requirement came out differently: it's a verification mode,
+not just a slower one. `preview()` reports the reach before a run, inside a read-only transaction.
+
+Two consequences:
+- A requirement only the model can decide, and that no change reaches, keeps its baseline verdict *legitimately*, so the
+  recommendation is `complete` unless a change reaches such a requirement.
+- Live edits since the baseline are put through the same `reach()`. A model-only verdict they reach is flagged "baseline
+  may be out of date" (`summary.stale_baseline`).
+
+**Tests (`tests/test_simulation_impact.py`).**
+- Selective == full across 17 hypotheses: every change kind singly, the fixture's edge cases, and all of them together.
+  Each full run is also the self-check above.
+- A test that replaces the analysis with recorded-dependencies-only shows the full run refusing to complete.
+
+**Mode A finding, reported separately (R6), not fixed.** The live targeted reassessment has the gap described above.
+`api/assessments.put_fact` re-queues only the lots whose verdicts *used* the edited fact (`profile.service.verdicts_using`),
+and `changes.apply.apply_profile_change` reassesses only requirements with a recorded `fact` dependency on it. Editing a
+fact a verdict set aside (for example, giving the missing BS EN 1729-2 report a different product, or a second insurance
+policy) leaves the live verdict stale. I found this by reading the code; no test demonstrates it yet. The `examines`
+closure in `simulation/impact.reads()` is a candidate fix, but that's a Mode A change for its own decision.

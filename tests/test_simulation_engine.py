@@ -54,7 +54,7 @@ def test_a_run_reports_the_effect_and_changes_nothing_live(base):
     lead = rows[base["lead"]]
     assert (lead["baseline_status"], lead["control_status"], lead["simulated_status"], lead["how"]) == (
         "not_met", "not_met", "needs_confirmation", "rule")
-    assert lead["simulated"]["touched"] and lead["simulated"]["effect"]
+    assert [x["kind"] for x in lead["simulated"]["reached"]] == ["direct"] and lead["simulated"]["effect"]
     # Atlas's 45 days is declared, not proven: the rules say it now meets the bound but must be confirmed.
     assert lead["simulated"]["simulated"]["observed"] and lead["simulated"]["control"]["status"] == "not_met"
     s = out["summary"]
@@ -62,7 +62,8 @@ def test_a_run_reports_the_effect_and_changes_nothing_live(base):
     assert s["drift"] == []
     assert s["recommendation"]["control"].startswith("Blocker found")
     assert not s["recommendation"]["simulated"].startswith("Blocker found")
-    assert s["recommendation"]["complete"] is False, "the installation requirement can only be read by the model"
+    assert rows[base["install"]]["how"] == "not_affected", "only the model reads it, but nothing the change touches reaches it"
+    assert s["recommendation"]["complete"] is True, "so its baseline verdict still holds, and the recommendation is exact"
 
 
 def test_control_reproduces_the_live_rule_verdicts_exactly(base):
@@ -83,13 +84,16 @@ def test_control_reproduces_the_live_rule_verdicts_exactly(base):
 
 
 def test_a_requirement_only_the_model_can_decide_is_never_guessed(base):
-    sid = simulate(base, [])
+    """The installation requirement has no rule. A deadline change reaches it (the model is told the deadline), so it
+    would need the model to re-decide: it is reported as such, with no status, and the recommendation is incomplete."""
+    sid = simulate(base, [{"kind": "set_notice_field", "field": "notice.deadline", "value": "2099-06-30"}])
     engine.run(base["db"], base["atlas"], sid)
     install = by_requirement(base, sid)[base["install"]]
     assert install["how"] == "needs_model"
     assert install["control_status"] is None and install["simulated_status"] is None
     assert install["baseline_status"] == "met", "the live verdict is reported as it was, not recomputed"
-    assert status(base, sid)["summary"]["needs_model"] == [base["install"]]
+    s = status(base, sid)["summary"]
+    assert s["needs_model"] == [base["install"]] and s["recommendation"]["complete"] is False
 
 
 def test_new_wording_is_reported_as_needing_the_model(base):
@@ -107,8 +111,9 @@ def test_a_fact_change_reaches_the_requirements_that_used_the_fact(base):
     engine.run(base["db"], base["atlas"], sid)
     rows = by_requirement(base, sid)
     assert (rows[base["lead"]]["control_status"], rows[base["lead"]]["simulated_status"]) == ("not_met", "needs_confirmation")
-    assert rows[base["lead"]]["simulated"]["touched"]
-    assert not rows[base["standard"]]["simulated"]["touched"]
+    lead = rows[base["lead"]]["simulated"]["reached"]
+    assert {(x["kind"], x["target"]) for x in lead} == {("used", f"fact:{capacity}")}, "the baseline verdict used this fact"
+    assert rows[base["standard"]]["how"] == "not_affected", "a certificate requirement never reads capacity facts"
 
 
 def test_runs_are_deterministic(base):

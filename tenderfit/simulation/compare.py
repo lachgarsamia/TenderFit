@@ -17,7 +17,7 @@ class Row:
     baseline_status: str | None
     control: dict | None    # the decision record, or None when only the model could decide it
     simulated: dict | None
-    touched: bool = False   # a change names this requirement or something it was decided on
+    reached: list[dict] = field(default_factory=list)  # impact.Reason records: why a change can affect it
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -30,6 +30,8 @@ class Row:
 
     @property
     def how(self) -> str:
+        if not self.reached:
+            return "not_affected"  # no change reaches it: its simulated verdict is its control verdict
         return "rule" if self.control and self.simulated else "needs_model"
 
     @property
@@ -60,13 +62,16 @@ def summarise(rows: list[Row], baseline_recommendation: str | None, control_reco
         "drift": [{"requirement_id": r.requirement_id, "baseline": r.baseline_status, "control": r.control_status}
                   for r in rows if r.drift],
         "needs_model": needs_model,
+        "not_affected": [r.requirement_id for r in rows if r.how == "not_affected"],
+        "stale_baseline": [r.requirement_id for r in rows if any(n.startswith("baseline may be out of date") for n in r.notes)],
         "counts": {"baseline": _counts([r.baseline_status for r in rows]),
                    "control": _counts([r.control_status for r in rows]),
                    "simulated": _counts([r.simulated_status for r in rows])},
         "recommendation": {
             "baseline": baseline_recommendation, "control": control_recommendation, "simulated": simulated_recommendation,
-            # Requirements only the model can decide keep their baseline verdict in both control and simulated, so the
-            # recommendation compares like with like, but it is complete only if the rules decided everything.
+            # A requirement only the model can decide keeps its baseline verdict in both control and simulated, so the
+            # recommendation compares like with like. That is exact when no change reaches it, so the recommendation is
+            # complete unless a change reaches a requirement only the model could re-decide.
             "complete": not needs_model,
         },
     }
