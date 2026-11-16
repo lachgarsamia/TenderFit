@@ -424,7 +424,8 @@ as `agent_unavailable`, and nothing is guessed.
 
 ## 11. Validation before merge
 
-**Real-model smoke test** (`tests/test_live_agent_smoke.py`, opt-in: `LIVE_LLM=1 bash scripts/test.sh tests/test_live_agent_smoke.py -s`).
+**Real-model smoke test** (`tests/live_agent_smoke.py`). It isn't collected by default, because CI fails on any skipped
+test. Run it by naming it: `LIVE_LLM=1 bash scripts/test.sh tests/live_agent_smoke.py -s`.
 The baseline is built with the scripted model; only the agent uses `claude-opus-5-5`.
 
 | Question | Outcome | Verified change |

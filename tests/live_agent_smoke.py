@@ -1,6 +1,10 @@
-"""Real-model smoke test for the what-if agent. Opt-in: LIVE_LLM=1 bash scripts/test.sh tests/test_live_agent_smoke.py -s
+"""Real-model smoke test for the what-if agent. It costs real money, so it is never collected automatically: the file
+name does not match test_*.py. Run it by naming it:
 
-The baseline is built with the scripted model as usual; only the agent talks to the real model. It costs real money."""
+    LIVE_LLM=1 bash scripts/test.sh tests/live_agent_smoke.py -s
+
+It fails, rather than skips, without LIVE_LLM=1: CI treats any skipped test as a failed run.
+The baseline is built with the scripted model as usual; only the agent talks to the real model."""
 import json
 import os
 
@@ -14,7 +18,6 @@ from tests.test_simulation import base as _base
 from tests.test_simulation import live_fingerprint
 
 base = _base
-pytestmark = pytest.mark.skipif(os.environ.get("LIVE_LLM") != "1", reason="set LIVE_LLM=1 to call the real model")
 
 QUESTIONS = [
     "What if the buyer accepted our 45-day lead time?",
@@ -25,6 +28,8 @@ QUESTIONS = [
 
 
 def test_live_agent(base):
+    if os.environ.get("LIVE_LLM") != "1":
+        pytest.fail("set LIVE_LLM=1 to call the real model; this test costs money")
     db = base["db"]
     llm = AnthropicLLM()
     before = live_fingerprint(db)
