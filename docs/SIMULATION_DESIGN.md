@@ -419,3 +419,32 @@ as `agent_unavailable`, and nothing is guessed.
 - No live-model evaluation yet: every agent test uses a scripted model.
 - The answer prose isn't checked; only the structured claims are. A model could still write something misleading in the
   free text, so a UI should show the verified `changed` and `recommendation` fields, not just the prose.
+
+---
+
+## 11. Validation before merge
+
+**Real-model smoke test** (`tests/test_live_agent_smoke.py`, opt-in: `LIVE_LLM=1 bash scripts/test.sh tests/test_live_agent_smoke.py -s`).
+The baseline is built with the scripted model; only the agent uses `claude-opus-5-5`.
+
+| Question | Outcome | Verified change |
+|---|---|---|
+| What if the buyer accepted our 45-day lead time? | answered | lead time `not_met → needs_confirmation`; blocker cleared |
+| What if our BS EN 1729-2 test report were on file? | answered (chose fact 10 itself) | standard `unknown → met`; lead time still blocks; installation flagged `needs_model` |
+| What if the lot quantity were 400 desks? | answered | quantity `met → not_met` (capacity 300) |
+| What if we cut our price by 10%? | `cannot_simulate` | none: price is not assessed |
+
+No claims were rejected, no invalid changes were proposed, and the live fingerprint was unchanged. The four questions cost
+about $0.22 in total.
+
+**Found by the live run, and fixed:**
+1. *The API rejected the `add_change` tool.* Strict tool schemas need every object's properties declared, and `change`
+   was an open object. It's now a JSON string, still validated strictly by `store.add_change`. A new unit test applies
+   the strict-schema rules to every tool. The failure was safe (`agent_unavailable`, nothing guessed, nothing written).
+2. *The model mislabelled an unaffected model-only requirement as "needs model"*, because it was shown blank statuses.
+   `run_simulation` now says what each `how` means, including "its baseline verdict (met) stands".
+3. *A generated caveat read "requirements 3 need".* Fixed, and covered by a test.
+
+**Found by self-review, and fixed:** `python -m tenderfit.demo reset` failed with a foreign-key violation once a demo
+lot had simulations. It now deletes that lot's simulations first; their changes, results and trace cascade with them.
+A regression test reproduced the failure before the fix.

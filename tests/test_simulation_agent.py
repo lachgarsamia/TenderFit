@@ -2,6 +2,8 @@
 
 The model is scripted, so every test is deterministic and free. Each test that runs the agent also compares
 live_fingerprint, which covers llm_call and agent_step: the agent's own trace and costs must stay in simulation tables."""
+import json
+
 import psycopg
 import pytest
 
@@ -41,8 +43,13 @@ class ScriptedAgent:
         return self.seen[-1][-1]["content"]
 
 
+def _j(change: dict) -> str:
+    """The add_change tool takes the change as a JSON string, as the real tool schema requires."""
+    return json.dumps(change)
+
+
 def lead_45(b):
-    return ("add_change", {"change": {"kind": "set_condition_bound", "requirement_id": b["lead"], "condition": 0, "bound": 45}})
+    return ("add_change", {"change": _j({"kind": "set_condition_bound", "requirement_id": b["lead"], "condition": 0, "bound": 45})})
 
 
 def happy(b):
@@ -74,6 +81,23 @@ def test_the_agent_answers_from_the_simulation_and_writes_nothing_live(base):
     db.rollback()
     assert sim["status"] == "completed" and sim["title"] == QUESTION and len(sim["changes"]) == 1
     assert agent.answer(db, base["atlas"], out["simulation_id"]) == out
+
+
+def test_the_model_is_told_an_unreached_requirement_keeps_its_verdict(base):
+    """Found with the real model: shown blank statuses for the installation requirement, it called it "needs model"."""
+    llm = ScriptedAgent(happy(base))
+    ask(base, llm)
+    shown = json.loads(llm.seen[4][-1]["content"][0]["content"])
+    install = next(r for r in shown["requirements"] if r["requirement_id"] == base["install"])
+    assert install["how"] == "not_affected" and "baseline verdict (met) stands" in install["meaning"]
+
+
+def test_generated_caveats_read_correctly(base):
+    deadline = ("add_change", {"change": _j({"kind": "set_notice_field", "field": "notice.deadline", "value": "2099-06-30"})})
+    finish = ("finish", {"answer": "No verdict changes.", "changed": [], "caveats": []})
+    out = ask(base, ScriptedAgent([deadline, ("run_simulation", {}), finish]))
+    assert out["caveats"][0] == (f"requirement {base['install']} needs a model to re-assess; "
+                                 "the rules alone cannot say how the change affects it")
 
 
 def test_the_trace_records_every_step_and_its_cost(base):
@@ -114,7 +138,7 @@ def test_an_answer_before_any_run_is_refused(base):
 
 
 def test_an_invalid_change_is_reported_back_and_can_be_corrected(base):
-    bad = ("add_change", {"change": {"kind": "set_condition_bound", "requirement_id": base["lead"], "condition": 0, "bound": -5}})
+    bad = ("add_change", {"change": _j({"kind": "set_condition_bound", "requirement_id": base["lead"], "condition": 0, "bound": -5})})
     llm = ScriptedAgent([bad] + happy(base))
     out = ask(base, llm)
     err = llm.seen[1][-1]["content"][0]
@@ -126,7 +150,7 @@ def test_an_invalid_change_is_reported_back_and_can_be_corrected(base):
 def test_the_agent_cannot_reach_another_suppliers_facts(base):
     db = base["db"]
     before = live_fingerprint(db)
-    other = ("add_change", {"change": {"kind": "set_fact_value", "fact_id": base["other_fact"], "key": "amount_gbp", "value": 1}})
+    other = ("add_change", {"change": _j({"kind": "set_fact_value", "fact_id": base["other_fact"], "key": "amount_gbp", "value": 1})})
     llm = ScriptedAgent([other, ("cannot_simulate", {"reason": "no such fact"})])
     ask(base, llm)
     assert "not in this supplier's profile snapshot" in llm.seen[1][-1]["content"][0]["content"]
@@ -144,12 +168,36 @@ def test_a_tool_outside_the_list_does_nothing(base):
     assert out["outcome"] == "unsupported" and live_fingerprint(db) == before
 
 
+def test_a_change_that_is_not_json_is_reported_back(base):
+    llm = ScriptedAgent([("add_change", {"change": "{kind: set_condition_bound"}), ("cannot_simulate", {"reason": "stop"})])
+    ask(base, llm)
+    err = llm.seen[1][-1]["content"][0]
+    assert err.get("is_error") and "JSON object string" in err["content"]
+
+
+def test_every_tool_schema_is_valid_for_strict_tool_use():
+    """Strict tool use requires every object schema to declare additionalProperties: false and list all properties as
+    required. The real API refused an open object here; the scripted model never sends schemas, so check them directly."""
+    def walk(node, path):
+        if isinstance(node, dict):
+            if node.get("type") == "object":
+                assert node.get("additionalProperties") is False, path
+                assert set(node.get("required", [])) == set(node.get("properties", {})), path
+            for k, v in node.items():
+                walk(v, f"{path}.{k}")
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, f"{path}[{i}]")
+    for t in agent.TOOLS:
+        walk(t["input_schema"], t["name"])
+
+
 def test_an_added_fact_is_given_its_id_so_later_changes_can_use_it(base):
-    add = ("add_change", {"change": {"kind": "add_fact", "attribute": "test_report", "label": "BS EN 1729-2 report (2026)",
-                                     "value": {"product": "ND-120", "standard": "BS EN 1729-2"}, "evidence_status": "declared"}})
-    then = lambda messages: ("add_change", {"change": {  # noqa: E731
+    add = ("add_change", {"change": _j({"kind": "add_fact", "attribute": "test_report", "label": "BS EN 1729-2 report (2026)",
+                                     "value": {"product": "ND-120", "standard": "BS EN 1729-2"}, "evidence_status": "declared"})})
+    then = lambda messages: ("add_change", {"change": _j({  # noqa: E731
         "kind": "set_fact_evidence", "evidence_status": "document_on_file",
-        "fact_id": __import__("json").loads(messages[-1]["content"][0]["content"])["fact_id"]}})
+        "fact_id": json.loads(messages[-1]["content"][0]["content"])["fact_id"]})})
     llm = ScriptedAgent([add, then, ("cannot_simulate", {"reason": "stop"})])
     out = ask(base, llm)
     assert '"fact_id": -1' in llm.seen[1][-1]["content"][0]["content"]

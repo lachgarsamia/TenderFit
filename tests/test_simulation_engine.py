@@ -7,15 +7,19 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from tenderfit.assessment.pipeline import decide, load_facts, lot_context
+from tenderfit.demo.__main__ import reset
 from tenderfit.rules.engine import NOT_MET
 from tenderfit.simulation import engine, store
 from tenderfit.simulation.changes import SimulationError, SimulationNotFound
+from tests.test_demo_and_api import ARGS
+from tests.test_demo_and_api import demo as _demo
 from tests.test_isolation import world  # noqa: F401  (fixture)
 from tests.test_pipeline import TODAY
 from tests.test_simulation import base as _base
 from tests.test_simulation import live_fingerprint, valid_changes
 
 base = _base  # the fixture, shared with test_simulation.py
+demo = _demo
 
 LEAD_OK = {"kind": "set_condition_bound", "condition": 0, "bound": 45}
 
@@ -318,3 +322,20 @@ def test_every_change_kind_runs(base):
     out = engine.run(db, base["atlas"], sid)
     assert live_fingerprint(db) == before
     assert out["status"] == "completed" and len(by_requirement(base, sid)) == 4
+
+
+# --- Living alongside the demo -----------------------------------------------------------------------------------------------
+
+def test_the_demo_reset_still_works_when_a_demo_lot_has_simulations(demo):
+    """Simulations point at the demo's lot, assessment, version, requirements and verdicts; the reset must remove them
+    first rather than fail on those foreign keys."""
+    db, bright, _, lots = demo
+    aid = db.execute("""SELECT id FROM assessment WHERE profile_id = %s AND status = 'done' AND NOT shadow AND NOT superseded
+                        ORDER BY id DESC LIMIT 1""", (bright,)).fetchone()["id"]
+    db.rollback()
+    sid = store.create(db, bright, aid, "tester", as_of=TODAY)
+    engine.run(db, bright, sid)
+    reset(db, ARGS)
+    assert db.execute("SELECT count(*) n FROM opportunity").fetchone()["n"] == 0
+    assert db.execute("SELECT count(*) n FROM simulation").fetchone()["n"] == 0
+    db.rollback()

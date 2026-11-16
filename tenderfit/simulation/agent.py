@@ -30,7 +30,7 @@ def _obj(props: dict, required: list[str] | None = None) -> dict:
     return {"type": "object", "additionalProperties": False, "properties": props, "required": required or list(props)}
 
 
-CHANGE_HELP = """One hypothetical change, as an object with "kind" and its fields:
+CHANGE_HELP = """change is one hypothetical change as a JSON object string, with "kind" and its fields:
 set_condition_bound {requirement_id, condition (ordinal), bound (number)}: a numeric threshold in a requirement;
 set_condition_match {requirement_id, condition, match}: which standard or certificate a requirement names;
 set_fact_validity {fact_id, valid_until (YYYY-MM-DD or null)}; set_fact_evidence {fact_id, evidence_status
@@ -52,7 +52,9 @@ TOOLS = [
      "input_schema": _obj({"attribute": {"anyOf": [{"type": "string"}, {"type": "null"}]}})},
     {"name": "add_change", "description": "Record one hypothetical change. It is checked against the snapshot and the changes "
                                           "already recorded; an error says what to fix. " + CHANGE_HELP,
-     "input_schema": _obj({"change": {"type": "object"}})},
+     # A string, not an object: strict tool schemas need every property of an object declared, and the nine kinds have
+     # different fields (add_fact's value is free-form). store.add_change validates it strictly either way.
+     "input_schema": _obj({"change": {"type": "string"}})},
     {"name": "preview", "description": "Which requirements the recorded changes can reach, and why. Run it before run_simulation.",
      "input_schema": _obj({})},
     {"name": "run_simulation", "description": "Run the rule engine on the snapshot with and without the changes. A simulation runs "
@@ -213,7 +215,11 @@ class _Session:
                            "evidence_status": f.evidence_status, "valid_until": f.valid_until}
                           for f in snap.facts if not attribute or f.attribute == attribute]}
 
-    def add_change(self, change: dict) -> dict:
+    def add_change(self, change: str) -> dict:
+        try:
+            change = json.loads(change)
+        except (TypeError, json.JSONDecodeError) as e:
+            return {"error": f"change must be a JSON object string: {e}"}
         ordinal = store.add_change(self.conn, self.profile_id, self.sid, change)
         added = [c for c in store.get(self.conn, self.profile_id, self.sid)["changes"] if c["kind"] == "add_fact"]
         self.conn.rollback()
@@ -233,10 +239,7 @@ class _Session:
         rows = store.results(self.conn, self.profile_id, self.sid)
         self.conn.rollback()
         return {"summary": self.summary,
-                "requirements": [{"requirement_id": r["requirement_id"], "how": r["how"], "baseline": r["baseline_status"],
-                                  "control": r["control_status"], "simulated": r["simulated_status"],
-                                  "reason": (r["simulated"].get("simulated") or {}).get("reason"),
-                                  "notes": r["simulated"].get("notes", [])} for r in rows]}
+                "requirements": [_result_row(r) for r in rows]}
 
     def finish(self, answer: str, changed: list[dict], caveats: list[str]) -> tuple[dict, bool]:
         """Accepted only if its claims are the results: which verdicts changed, from what, to what."""
@@ -249,19 +252,38 @@ class _Session:
                     "actual_changes": self.summary["changed"]}, False
         rec = self.summary["recommendation"]
         own = []
-        if self.summary["needs_model"]:
-            own.append(f"requirements {', '.join(map(str, self.summary['needs_model']))} need a model to re-assess; "
-                       "the rules alone cannot say how they change")
+        if ids := self.summary["needs_model"]:
+            one = len(ids) == 1
+            own.append(f"{_requirements(ids)} {'needs' if one else 'need'} a model to re-assess; "
+                       f"the rules alone cannot say how the change affects {'it' if one else 'them'}")
         if self.summary["drift"]:
             own.append("the live profile changed since the baseline ran; those differences are drift, not part of this answer")
-        if self.summary["stale_baseline"]:
-            own.append(f"baseline verdicts for {', '.join(map(str, self.summary['stale_baseline']))} may be out of date")
+        if ids := self.summary["stale_baseline"]:
+            own.append(f"the baseline verdict for {_requirements(ids)} may be out of date")
         self.outcome = self._result(
             "answered", answer=answer.strip()[:4000], changed=self.summary["changed"],
             recommendation={"before": rec["control"], "after": rec["simulated"], "complete": rec["complete"]},
             caveats=own + [str(c)[:500] for c in caveats][:10],
             notice="A hypothetical result. The real assessment is unchanged and this is not a verdict.")
         return self.outcome, True
+
+
+def _requirements(ids: list[int]) -> str:
+    return ("requirement " if len(ids) == 1 else "requirements ") + ", ".join(map(str, ids))
+
+
+def _result_row(r: dict) -> dict:
+    """What the model is shown for one requirement. A requirement no change reaches keeps its verdict, and says so,
+    including one only the model could decide, whose baseline verdict then stands unchanged."""
+    out = {"requirement_id": r["requirement_id"], "how": r["how"], "baseline": r["baseline_status"],
+           "control": r["control_status"], "simulated": r["simulated_status"],
+           "reason": (r["simulated"].get("simulated") or {}).get("reason"), "notes": r["simulated"].get("notes", [])}
+    if r["how"] == "not_affected":
+        out["meaning"] = "no change reaches it, so its verdict is unchanged" + (
+            f": its baseline verdict ({r['baseline_status']}) stands" if r["control_status"] is None else "")
+    elif r["how"] == "needs_model":
+        out["meaning"] = "a change reaches it, but only a model reading the text could say its new verdict"
+    return out
 
 
 def _jsonable(v):
