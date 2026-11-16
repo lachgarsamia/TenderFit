@@ -122,7 +122,7 @@ def test_simulation_state_lives_only_in_simulation_tables(base):
     assert get_assessment(base["lot"], base["atlas"]) == live_view, "what the supplier sees is unchanged"
     assert {t: db.execute(f"SELECT count(*) n FROM {t}").fetchone()["n"] for t in counts} == counts
     assert db.execute("SELECT count(*) n FROM simulation_change WHERE simulation_id = %s", (sid,)).fetchone()["n"] == len(valid_changes(base))
-    # Results can only be written by a run. Stage 4 has no runner, so nothing can put a result next to the live verdicts yet.
+    # Results can only be written during a run (engine.run), never by hand while the simulation is still being set up.
     with pytest.raises(psycopg.errors.RaiseException, match="only be added while the simulation is running"):
         db.execute("INSERT INTO simulation_result (simulation_id, requirement_id, how) VALUES (%s, %s, 'rule')", (sid, base["lead"]))
     db.rollback()

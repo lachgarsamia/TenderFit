@@ -299,3 +299,34 @@ Plus pure unit tests for `apply_changes` and each change validator, which need n
 4. **Evaluation scope in Stage 5:** rules-only, reporting "needs model" honestly (**recommended**) vs model-backed from the start.
 
 Out of scope, reported separately: the Mode A issue where `confirm._verdict()` accepts shadow verdict ids (audit R5).
+
+---
+
+## 8. Stage 5 as built
+
+**Mode A change** (`tenderfit/assessment/pipeline.py`), behaviour-preserving; the 384 tests that existed before it pass unedited:
+- `decide(..., *, conditions=None, interpret=True)`, as proposed in §3. `_uninterpreted()` returns either the definite
+  `not_met` a mandatory rule already decides, or `decided_by="needs_model"` (returned before the gap and conflict checks,
+  which only refine a decision that exists).
+- `_rule_outcomes(..., conditions=None)` evaluates the given condition rows instead of reading them.
+- `lot_dimensions()` is extracted from `_run` unchanged, so the simulation computes its recommendation with the same code
+  instead of a copy.
+
+**`tenderfit/simulation/engine.py`**: `run(conn, profile_id, simulation_id)`:
+1. a guarded `created → running` update, committed (a simulation runs once; a second call fails);
+2. inside `read_only`: verify the snapshot hash, build control (no changes) and simulated scenarios, call the live
+   `decide(interpret=False)` for each requirement on each, and compute both recommendations;
+3. one transaction: insert `simulation_result` rows and set `completed` with the summary.
+A failure in 2 or 3 rolls back and marks the run `failed` with `error_stage` (`evaluation` / `recording`), then re-raises.
+`recover_stale_simulations()` closes runs whose process died. It isn't scheduled anywhere yet.
+
+The model is replaced by `NO_MODEL`, which raises if called. A requirement whose wording changed, or that only the model
+can decide, is recorded `how = "needs_model"` with a NULL status. For the recommendation it keeps its baseline verdict in
+both control and simulated, and the summary says `complete: false`.
+
+**`tenderfit/simulation/compare.py`** (pure): effect = control → simulated; drift = baseline → control. `touched` is
+computed from the facts and fields the decisions actually used. Stage 6 replaces this with the recorded dependencies.
+
+**What a run still reads live** (identical for control and simulated, so it can't create a false effect): the requirement
+row's references and lineage, answered questions, overrides, the document inventory and rejected requirements. These are
+read at run time, not snapshotted, and can differ from what the baseline saw.

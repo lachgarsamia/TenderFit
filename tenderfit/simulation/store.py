@@ -108,3 +108,9 @@ def scenario(conn: Conn, profile_id: int, simulation_id: int) -> Scenario:
     """The simulation's snapshot with its recorded changes applied, rebuilt from what is stored."""
     row = _row(conn, profile_id, simulation_id)
     return apply_changes(Snapshot.from_json(row["snapshot"]), _changes(conn, simulation_id))
+
+
+def results(conn: Conn, profile_id: int, simulation_id: int) -> list[dict]:
+    _row(conn, profile_id, simulation_id)
+    return conn.execute("SELECT * FROM simulation_result WHERE simulation_id = %s ORDER BY requirement_id",
+                        (simulation_id,)).fetchall()
