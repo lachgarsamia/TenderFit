@@ -1,0 +1,301 @@
+# Stage 3 design: isolated simulations (Mode B foundation)
+
+Status: **proposal, awaiting approval.** No code has been written. It builds on `docs/SIMULATION_AUDIT.md` (§ references point
+there) and `docs/SIMULATION_BASELINE.md`.
+
+## 0. The goal in one sentence
+
+Given an existing assessment, take a frozen copy of everything it was decided on, apply validated hypothetical changes **in
+memory**, re-run TenderFit's own verdict logic on that copy, and store the outcome in tables live code never reads.
+
+```
+           LIVE (Mode A, unchanged)                          SIMULATION (Mode B, new)
+ ┌─────────────────────────────────────┐   read-only   ┌───────────────────────────────────────────┐
+ │ assessment ─ verdict ─ verdict_*    │ ────────────▶ │ simulation           (one experiment)      │
+ │ requirement ─ requirement_condition │   (FKs point  │ simulation_change    (typed hypotheses)    │
+ │ profile_fact ─ notice_version       │    this way   │ simulation_result    (per requirement)     │
+ │ dependency ─ question ─ verdict_cache│    only)      │                                           │
+ └─────────────────────────────────────┘               └───────────────────────────────────────────┘
+        ▲ never written by simulation code                  ▲ the only tables simulation code writes
+```
+
+---
+
+## 1. How isolation is guaranteed: four layers, each checked by a test
+
+Isolation isn't one mechanism. It's four independent layers, so any single mistake is caught by another.
+
+| # | Layer | Mechanism | What it stops |
+|---|---|---|---|
+| L1 | **Separate tables** | Simulation data lives only in `simulation_*`. No live table gets a new column, flag or row. Foreign keys point from simulation → live only. | The shadow failure mode (§4 of the audit): a forgotten `NOT shadow` filter. Live queries can't see simulation rows, because those rows aren't in the tables they query. |
+| L2 | **Read-only evaluation** | All computation runs inside a Postgres `READ ONLY` transaction (`conn.read_only = True`, verified to work in psycopg 3.3.7: the `INSERT` is rejected with `ReadOnlySqlTransaction`). Results are only computed in memory. | Hidden writes in reused code (`verdict_cache`, `llm_call`, `agent_step`, the cache-poisoning hazard of audit §5). Postgres *enforces* "no writes", so we don't have to trust our reading of the code. |
+| L3 | **One write transaction** | After evaluation, results are inserted into `simulation_result` and the simulation is marked `completed` in a single transaction. Any exception rolls it back; then a small separate transaction marks the simulation `failed`. This is the same pattern as `pipeline._mark_failed`. | Partially written simulations, and failures that touch live state. |
+| L4 | **No promotion path** | No function turns a simulation into an assessment. Mode A modules never import `tenderfit.simulation` (checked by a test). | A simulation silently becoming authoritative. |
+
+**The isolation test oracle:** a `live_fingerprint(conn)` test helper hashes every row of every non-simulation table
+(`md5(string_agg(row::text ORDER BY ...))` per table). Each isolation test takes a fingerprint before, does something, and
+asserts the fingerprint is identical after. This doesn't depend on guessing *which* table might be touched: it catches a
+write to **any** live table, including ones added in the future.
+
+*Alternatives considered:*
+- **A dedicated Postgres role with privileges only on `simulation_*`.** It's the strongest option, but it needs a second
+  connection pool, role management in migrations, and deployment changes. L2 gives the same "database says no" guarantee
+  for the evaluation phase, at no operational cost. Revisit if simulations ever run untrusted agent code.
+- **A separate database or schema.** It breaks the foreign keys to `assessment` and `requirement` that make baseline
+  references trustworthy.
+- **`assess_lot(shadow=True)` + rollback.** Ruled out in audit §3–4: it commits mid-run, and it can't take a hypothesis
+  without mutating live rows.
+
+---
+
+## 2. Domain model
+
+### 2.1 The baseline snapshot (what the simulation is decided on)
+
+A simulation freezes, at creation, everything the rule engine needs. It's built read-only from live tables:
+
+| Part | Source | Why it's frozen |
+|---|---|---|
+| Baseline assessment id, lot, profile, **tender version** | `assessment` | The tender version is immutable already (trigger `forbid_update`), so a reference is enough. |
+| Requirements + their conditions | `requirement`, `requirement_condition` for that version, visible to that profile | Hypotheses edit conditions; we need the original values to apply changes to and to show diffs. |
+| **Supplier facts** | `pipeline.load_facts(profile, lot, version)` → `list[Fact]`, serialised | **The profile has no versions (audit §7).** The snapshot *is* the profile version: it's stored with a SHA-256 hash, so "which profile state was used" has an exact, checkable answer. It includes the per-lot confirmations `load_facts` already resolves. |
+| Tender context | `pipeline.lot_context(...)` → `Context.fields` (deadline, quantity, regions, CPV, contract end) | Hypotheses can change the deadline or quantity. |
+| `as_of` date | default: the day the simulation is created | Validity (expiry, staleness) depends on "today". Pinning it makes a re-run reproducible. |
+| Baseline drift | facts with `updated_at > baseline.finished_at`, confirmations added since | See §2.4. |
+
+*Decision: snapshot, not profile versioning.* Adding versioning to `profile_fact` would change Mode A's tables and every
+write path in `profile/service.py`. A snapshot is local to Mode B, small (tens of facts), and exact. Live profile
+versioning can come later without changing this design. The snapshot would then just record a version id as well.
+
+### 2.2 Hypothetical changes: a closed, typed vocabulary
+
+Each change is a Pydantic model with a literal `kind`, combined into one discriminated union, `HypotheticalChange`.
+There's **no free-form patch**: a change can only express what its type allows, and an LLM can later only *propose*
+these objects, which go through the same validation.
+
+| `kind` | Fields | Validated against the snapshot | Brief's example it covers |
+|---|---|---|---|
+| `set_condition_bound` | `requirement_id`, `condition` (ordinal), `bound` | Condition exists on that requirement; its kind is `min_amount` / `at_least` / `at_most`; bound is finite and ≥ 0 (the same `_number` rules as the engine) | insurance £5M → £10M |
+| `set_condition_match` | `requirement_id`, `condition`, `match` | Kind is `has_evidence` / `valid_through`; match is non-empty and ≤ 200 characters | required certificate changes |
+| `set_fact_validity` | `fact_id`, `valid_until` | Fact is in the snapshot (and therefore belongs to this supplier) | a certificate expires |
+| `set_fact_evidence` | `fact_id`, `evidence_status` | A status in the `profile_fact` CHECK set | evidence downgraded to declared / missing |
+| `remove_fact` | `fact_id` | Fact is in the snapshot | remove an evidence item |
+| `set_fact_value` | `fact_id`, `key`, `value` | Re-validated with **`profile.service.clean_fact()`**, the live shape rules | turnover or insurance amount changes |
+| `add_fact` | `attribute`, `label`, `value`, `evidence_status`, `valid_until?` | `clean_fact()`; gets a negative id (-1, -2, …) so it can never collide with a real `profile_fact.id` | "what if we held ISO 14001?" |
+| `set_notice_field` | `field` ∈ {`notice.deadline`, `lot.quantity`}, `value` | Type per field (date / finite non-negative number) | deadline or quantity change |
+| `set_requirement_text` | `requirement_id`, `statement?`, `quote?` | Requirement exists | wording change. **Evaluating it needs the model, so Stage 5 reports it as "needs model"** (§3). |
+
+Changes are applied, in order, by a **pure** function `apply_changes(snapshot, changes) -> Scenario`. It has no `conn`
+and no I/O, so it can be unit tested exhaustively. Two changes to the same target are allowed; the later one wins, and
+the stored order makes that auditable.
+
+*Alternative considered:* JSON-Patch style edits on the snapshot. They're flexible, but nothing stops an edit that is
+syntactically valid and makes no sense, such as setting `evidence_status` to `"maybe"` or changing a fact's `id`. A closed
+vocabulary keeps simulations meaningful, explainable in the UI, and mappable to dependency targets (§4).
+
+### 2.3 Lifecycle
+
+```
+            add_change (only here)
+   ┌──────────┐ run ┌─────────┐ ok  ┌───────────┐
+   │ created  │────▶│ running │────▶│ completed │
+   └──────────┘     └─────────┘     └───────────┘
+        │               │ error           │
+        │               ▼                 │
+        │          ┌─────────┐            │
+        │          │ failed  │            │
+        │          └─────────┘            │
+        │               │                 │
+        └───────────────┴──── discard ────┴──────▶ discarded (terminal)
+```
+
+- Every transition is a **guarded update** (`UPDATE … SET status = new WHERE id = … AND status = expected RETURNING id`),
+  the same pattern as `assessment` in `pipeline._run`. A lost race fails loudly instead of overwriting.
+- **A simulation is run once.** Its changes freeze when it leaves `created`, and its results are written once. To try a
+  variation, create a new simulation; an optional `copy_changes_from` helper makes that cheap. This is the main reason
+  "one simulation can't modify another": none of them is ever edited after it runs.
+- **Discard is a soft state change, not a delete.** Rows are kept for audit, and nothing in live data references a
+  simulation, so there's nothing to cascade into. Discarding a `running` simulation isn't allowed (the run would race);
+  it can be discarded once it's `completed` or `failed`.
+- Database triggers back this up: `simulation_change` rows can only be inserted while the parent is `created`, and
+  `simulation_result` rows are immutable (the existing `forbid_update` trigger function is reused).
+
+### 2.4 Comparing like with like: baseline, control, simulated
+
+A naive comparison, "live verdict vs simulated verdict", mixes two causes: **the hypothesis**, and **drift** (facts
+edited since the baseline ran, a different `as_of` date, or model verdicts we don't recompute). So each requirement gets
+three statuses:
+
+| Column | Computed how | Meaning |
+|---|---|---|
+| `baseline_status` | copied from the live `verdict` | what TenderFit actually said |
+| `control_status` | rule engine on the snapshot, **no changes** | what the rules say now, on the frozen inputs |
+| `simulated_status` | rule engine on the snapshot **+ changes** | what the rules say under the hypothesis |
+
+- **The effect of the hypothesis is `control → simulated`.** Same inputs except the changes, so the difference is caused
+  by the changes and nothing else.
+- **`baseline ≠ control` is reported as drift, never as an effect.** It's useful in its own right: it shows a live
+  assessment that's out of date.
+
+*Alternative considered:* comparing against the baseline only. It's simpler, but it would credit the hypothesis with
+changes it didn't cause. That's exactly the kind of misleading answer an impact-analysis tool must not give.
+
+---
+
+## 3. Reusing the verdict logic: the one refactor in Mode A
+
+Audit §1 showed that `decide()` already takes facts and context as arguments, and that on the **rule-settled** path it only
+*reads*. Two things stop the simulation calling it directly:
+
+1. `_rule_outcomes()` reads conditions **from the database by requirement id**, so a changed bound would be ignored.
+2. When a condition needs interpretation, it calls `_model_decision()`, which writes `llm_call` / `verdict_cache` and
+   costs money.
+
+**Proposed change (Stage 5), two keyword arguments whose defaults preserve current behaviour exactly:**
+
+```python
+def decide(conn, version_id, req, facts, ctx, llm, budget_left, emb=None, rr=None, config=..., profile_id=None,
+           *, conditions: list[dict] | None = None,   # None → read from requirement_condition, as today
+           interpret: bool = True) -> Decision:      # False → never call the model; mark the requirement "needs_model"
+```
+
+- With `interpret=False`, a requirement with open mandatory conditions is returned as **"needs model interpretation"**,
+  with the rule-settled conditions still reported. If a rule already says `not_met`, then `parent_status` makes the parent
+  `not_met` whatever the model would add, and the simulation reports that definite result.
+- Mode A call sites don't change. **The whole existing suite (361 tests) must pass unmodified.**
+- `run_agent` is not reachable from `decide()` (it's called from `_run`), so simulations never run the agent.
+  L2 would reject its `agent_step` write anyway.
+
+*Alternatives considered:*
+- **Copy the rule path into `tenderfit/simulation/`.** No Mode A change, but two implementations of "how a verdict is
+  decided" would drift apart. That's the duplication the brief forbids.
+- **Pass a fake LLM that refuses.** No signature change, but it still reads `verdict_cache` by requirement id, which is
+  the cache-poisoning hazard on the read side. It would also label results "model unavailable", which is false.
+
+**Why rules-only first:** it's deterministic (same inputs, same output, so it's auditable), free, and it covers the
+headline scenarios: thresholds, certificates, expiry, evidence status and deadline are all rule conditions. Model-backed
+simulation needs a separate cache key that includes the requirement's text and conditions, plus a simulation-scoped trace
+table. It's a later, explicit decision.
+
+---
+
+## 4. How this connects to dependency-aware impact (Stage 6, for orientation)
+
+Each change type maps to the dependency targets `changes.impact.plan_reassessment` already understands:
+`set_fact_*` / `remove_fact` → `("fact", id)`; `set_notice_field` → `("field", path)`; condition and text changes → that
+requirement directly. Stage 6 uses `load_deps(baseline)` to recompute only the touched requirements. It's validated by a
+test asserting that **selective recomputation == full recomputation** on every rule-settled requirement. That's the same
+idea as the existing `shadow_full` audit, applied to simulations.
+
+---
+
+## 5. Persistence: migration `019_simulations.sql`
+
+Conventions from audit §11: `bigserial` ids, `CHECK` constraints for enums, partial indexes, `forbid_update` for
+immutability, no down-migration.
+
+```sql
+CREATE TABLE simulation (
+    id bigserial PRIMARY KEY,
+    profile_id bigint NOT NULL REFERENCES business_profile (id),
+    lot_id bigint NOT NULL REFERENCES lot (id),
+    baseline_assessment_id bigint NOT NULL REFERENCES assessment (id),
+    version_id bigint NOT NULL REFERENCES notice_version (id),
+    status text NOT NULL DEFAULT 'created' CHECK (status IN ('created', 'running', 'completed', 'failed', 'discarded')),
+    title text,                                   -- the question being asked, in the user's words
+    as_of date NOT NULL,
+    snapshot jsonb NOT NULL,                       -- facts, conditions, context fields (§2.1)
+    snapshot_sha256 text NOT NULL,
+    drift jsonb NOT NULL DEFAULT '{}',             -- facts/confirmations changed since the baseline ran
+    engine_version text NOT NULL,                  -- bumps when evaluation semantics change
+    summary jsonb,                                 -- counts of changed verdicts, recommendation before/after
+    error text, error_stage text,
+    created_by text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    started_at timestamptz, finished_at timestamptz, discarded_at timestamptz,
+    FOREIGN KEY (baseline_assessment_id, profile_id, lot_id, version_id)
+        REFERENCES assessment (id, profile_id, lot_id, version_id)   -- the baseline really is this lot/profile/version
+);
+CREATE INDEX simulation_profile ON simulation (profile_id, created_at DESC);
+CREATE INDEX simulation_baseline ON simulation (baseline_assessment_id);
+
+CREATE TABLE simulation_change (
+    id bigserial PRIMARY KEY,
+    simulation_id bigint NOT NULL REFERENCES simulation (id),
+    ordinal int NOT NULL,
+    kind text NOT NULL,
+    payload jsonb NOT NULL,                        -- the validated model, re-validated on read
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (simulation_id, ordinal)
+);
+
+CREATE TABLE simulation_result (
+    simulation_id bigint NOT NULL REFERENCES simulation (id),
+    requirement_id bigint NOT NULL REFERENCES requirement (id),
+    baseline_verdict_id bigint REFERENCES verdict (id),
+    baseline_status text, control_status text, simulated_status text,
+    simulated jsonb NOT NULL,                      -- reason, decided_by, conditions, facts used, required/observed
+    how text NOT NULL CHECK (how IN ('rule', 'needs_model', 'not_affected')),
+    PRIMARY KEY (simulation_id, requirement_id)
+);
+-- + triggers: results immutable (forbid_update); changes insertable only while the simulation is 'created'.
+```
+
+**One change touches a live table: an additive unique index on `assessment (id, profile_id, lot_id, version_id)`.** The
+composite foreign key above needs it. It can't fail, because `id` is already unique, and it changes no data or behaviour.
+In return, the database guarantees that a simulation's baseline belongs to the same supplier, lot and version it
+claims. The alternative is checking this only in application code.
+
+Results are stored as self-contained JSON per requirement, **not** as copies of the `verdict_*` link tables. Hypothetical
+facts have no `profile_fact` row to link to, and keeping the copies separate means no live link table ever holds simulation data.
+
+---
+
+## 6. Module layout: `tenderfit/simulation/`
+
+| File | Contents | Writes to the DB? |
+|---|---|---|
+| `changes.py` | `HypotheticalChange` union, `validate(change, snapshot)`, `SimulationError(ValueError)` (mirrors `ConfirmationError`, `ProfileError`) | no |
+| `snapshot.py` | `Snapshot` dataclass; `take_snapshot(conn, assessment_id) -> Snapshot` (read-only); `to_json` / `from_json`; `sha256` | no (reads) |
+| `scenario.py` | `apply_changes(snapshot, changes) -> Scenario` (pure) | no |
+| `store.py` | `create`, `add_change`, `discard`, `get`, `list_for_profile`, guarded transitions. **The only module that writes, and only to `simulation_*`.** | yes, `simulation_*` only |
+| `engine.py` *(Stage 5)* | `run(conn, simulation_id)`: read-only evaluation (L2), then one write transaction (L3) | yes, via `store` |
+| `compare.py` *(Stage 5)* | baseline / control / simulated deltas; recommendation via `rules.aggregate.dimensions` | no |
+
+Every public function takes `profile_id`, and every lookup is scoped by it, the same way `profile.service.owned_fact` is.
+A fact or requirement id from another supplier is reported as "not found", following the convention in `confirm.py`.
+
+---
+
+## 7. What Stage 4 will deliver, concretely
+
+**Code:** `changes.py`, `snapshot.py`, `scenario.py`, `store.py`, and migration `019`. No `engine.py` yet, and no Mode A
+changes at all in Stage 4. The `decide()` refactor belongs to Stage 5.
+
+**Tests:** `tests/test_simulation.py`, using the `world` fixture pattern and a `live_fingerprint` helper. They map to the
+brief's list:
+
+| Brief | Test |
+|---|---|
+| 1 | creating a simulation leaves `live_fingerprint` identical |
+| 2 | adding valid changes of every kind leaves `live_fingerprint` identical (live verdicts untouched) |
+| 3 | simulation rows exist only in `simulation_*`; `get_assessment()` output is identical before and after |
+| 4 | the simulation records the right baseline / version / profile; the composite FK rejects a mismatched baseline; the snapshot hash matches a fresh `load_facts` |
+| 5 | invalid changes are rejected: unknown fact, another supplier's fact, wrong condition kind, negative or NaN bound, unknown field, change after `created` (both app and trigger) |
+| 6 | discarding leaves `live_fingerprint` identical, and a discarded simulation accepts no changes or run |
+| 7 | two simulations on one baseline: changes and state transitions on A leave B's rows byte-identical |
+| 8 | a failure during creation (forced error after the snapshot is taken) leaves no simulation row and an unchanged fingerprint. The full failure-during-run test comes with `engine.py` in Stage 5. |
+
+Plus pure unit tests for `apply_changes` and each change validator, which need no database.
+
+---
+
+## 8. Decisions I need from you (my recommendation first)
+
+1. **Profile state:** snapshot inside the simulation (**recommended**) vs adding profile versioning to Mode A now.
+2. **Additive unique index on `assessment`** for the composite baseline FK: accept (**recommended**) vs enforce in application code only.
+3. **Baselines:** allow any `done`, non-shadow assessment, including superseded historical ones (**recommended**, the brief
+   asks to preserve historical baselines) vs only the current one.
+4. **Evaluation scope in Stage 5:** rules-only, reporting "needs model" honestly (**recommended**) vs model-backed from the start.
+
+Out of scope, reported separately: the Mode A issue where `confirm._verdict()` accepts shadow verdict ids (audit R5).
