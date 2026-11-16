@@ -378,3 +378,44 @@ and `changes.apply.apply_profile_change` reassesses only requirements with a rec
 fact a verdict set aside (for example, giving the missing BS EN 1729-2 report a different product, or a second insurance
 policy) leaves the live verdict stale. I found this by reading the code; no test demonstrates it yet. The `examines`
 closure in `simulation/impact.reads()` is a candidate fix, but that's a Mode A change for its own decision.
+
+---
+
+## 10. Stage 7 as built: the what-if agent
+
+**`tenderfit/simulation/agent.py`**: `ask(conn, profile_id, baseline_assessment_id, question, llm, created_by)` creates one
+simulation (titled with the question), then runs a single tool-using loop.
+- **Tools:** `read_baseline`, `read_facts` (the snapshot, not the live profile), `add_change`, `preview`,
+  `run_simulation`, and two ways to finish: `finish` and `cannot_simulate`.
+- **What decides:** the model only proposes. Every change goes through `store.add_change` validation, and every verdict
+  comes from `engine.run`.
+- **The answer is checked against the results:** `finish` is accepted only when its `changed` list equals the stored
+  results exactly. Otherwise the model is shown the real changes and has to try again.
+- **Caveats are generated, not written by the model:** needs-model requirements, drift and stale baselines.
+- **Every answer is labelled:** "A hypothetical result … not a verdict."
+
+**Why not reuse `agent.loop.run_agent`:** it writes `agent_step` and `llm_call` (live tables) on every step, and its tools
+read the live profile and the documents. The new loop reuses `agent.loop.Budget`, the `LLM` tool-turn protocol and the
+`untrusted()` wrapping. The trace and costs go to **`simulation_agent_step`** (migration `020_simulation_agent.sql`),
+which is append-only and closed once the simulation is discarded. One step is committed at a time, so the trace survives
+a failure later in the session.
+
+**Limits:** at most 12 tool calls and the lot cost, token and time caps (`Budget`). An unreachable model ends the session
+as `agent_unavailable`, and nothing is guessed.
+
+**Tests (`tests/test_simulation_agent.py`, 17, with a scripted model):**
+- isolation: the whole `ask` leaves `live_fingerprint` unchanged. A mutation that logs to `llm_call` makes this test fail;
+- the answer check: wrong claims are refused, and so is an answer given before the run;
+- model mistakes: invalid changes are reported back and can be corrected; another supplier's facts are unreachable;
+  unknown tools (`update_fact`, `record_verdict`) do nothing;
+- the id of an added fact is returned so later changes can use it;
+- ending without an answer: unsupported questions, the tool-call and cost limits, an unreachable model, text-only turns;
+- the trace: append-only, and closed once the simulation is discarded;
+- per-supplier scoping of the answer and the trace.
+
+**Not done in Stage 7:**
+- No API route or UI yet. Running an LLM session inside a request, rather than as a job, is a decision to make
+  separately.
+- No live-model evaluation yet: every agent test uses a scripted model.
+- The answer prose isn't checked; only the structured claims are. A model could still write something misleading in the
+  free text, so a UI should show the verified `changed` and `recommendation` fields, not just the prose.
