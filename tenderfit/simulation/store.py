@@ -8,6 +8,7 @@ from datetime import date
 from psycopg.types.json import Jsonb
 
 from tenderfit.db import Conn, must
+from tenderfit.simulation import inputs
 from tenderfit.simulation.changes import (
     HypotheticalChange,
     SimulationConflict,
@@ -33,6 +34,8 @@ def create(conn: Conn, profile_id: int, baseline_assessment_id: int, created_by:
         raise SimulationError("say who created the simulation")
     with read_only(conn):
         snap, drift = take_snapshot(conn, profile_id, baseline_assessment_id, as_of)
+        # The live inputs the snapshot does not freeze, as they are now. drift cannot be updated later (019's guard).
+        drift = {**drift, "live_inputs_at_creation": inputs.read(conn, snap)}
     try:
         sid = must(conn.execute(
             """INSERT INTO simulation (profile_id, lot_id, baseline_assessment_id, version_id, title, as_of, snapshot,

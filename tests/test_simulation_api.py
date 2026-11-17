@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tenderfit.api.main import app
+from tenderfit.db import connect
 from tenderfit.simulation import engine, store
 from tests.conftest import as_supplier
 from tests.test_isolation import world  # noqa: F401  (fixture)
@@ -118,7 +119,10 @@ def test_the_baseline_stays_frozen_while_the_live_profile_moves_on(api):
     db.commit()
     A.post(f"/simulations/{sim['id']}/changes", json={"change": lead(api)})
     done = A.post(f"/simulations/{sim['id']}/run").json()
-    assert done["snapshot_sha256"] == sim["snapshot_sha256"], "the snapshot taken at creation is what was run"
+    # The hash covers the frozen part only (facts, requirement wording and conditions, tender fields, date); live inputs
+    # are tracked separately in summary.execution (tests/test_simulation_inputs.py).
+    assert done["snapshot_sha256"] == sim["snapshot_sha256"], "the frozen part of the snapshot is unchanged"
+    assert done["summary"]["execution"]["snapshot_sha256"] == sim["snapshot_sha256"]
     snap = store.get(db, api["atlas"], sim["id"])["snapshot"]
     db.rollback()
     capacity = next(f for f in snap["facts"] if f["id"] == api["facts"]["capacity"])
@@ -234,13 +238,18 @@ def test_lifecycle_conflicts(api):
     assert A.post(f"/simulations/{other}/changes", json={"change": lead(api)}).status_code == 409
 
 
-def test_a_running_simulation_cannot_be_discarded(api):
+def test_a_running_simulation_cannot_be_discarded(api, _test_db):
+    """While its run is alive (it holds the run lock on its own connection, as engine.run does), it cannot be discarded."""
     db = api["db"]
     sid = new(api)["id"]
-    db.execute("UPDATE simulation SET status = 'running', started_at = now() WHERE id = %s", (sid,))
-    db.commit()
-    r = api["A"].post(f"/simulations/{sid}/discard")
-    assert r.status_code == 409 and "until it finishes" in r.json()["detail"]
+    with connect(_test_db) as running:
+        running.execute("SELECT pg_advisory_lock(%s, %s)", engine._lock_key(sid))
+        running.execute("UPDATE simulation SET status = 'running', started_at = now() WHERE id = %s", (sid,))
+        running.commit()
+        r = api["A"].post(f"/simulations/{sid}/discard")
+        assert r.status_code == 409 and "until it finishes" in r.json()["detail"]
+        assert api["A"].get(f"/simulations/{sid}").json()["status"] == "running", "a live run is never closed"
+    db.rollback()
 
 
 def test_a_failed_run_is_marked_failed_and_its_internals_stay_private(api, monkeypatch):

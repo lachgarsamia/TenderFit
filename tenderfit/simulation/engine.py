@@ -7,6 +7,10 @@ Three phases, each with its own transaction:
   3. record:    results and completed status in one write transaction, touching only this simulation's rows.
 Any failure after the start marks the simulation failed, with the stage it failed in, and is raised again.
 
+A run holds a session-level advisory lock on its own connection from before the start until after its final status is
+committed. A process that dies mid-run loses its connection, and Postgres releases the lock; close_abandoned_runs closes a
+running simulation only when it can take that lock, so it never closes a run that is still alive, however long it takes.
+
 Only requirements a change can reach (impact.reach) are recomputed; every other one keeps its control verdict.
 selective=False recomputes them all and raises if one of those it would have skipped comes out differently.
 
@@ -21,12 +25,12 @@ from tenderfit.assessment.confirm import overrides
 from tenderfit.assessment.pipeline import Decision, _lineage, _source_label, decide, lot_dimensions
 from tenderfit.changes.impact import load_deps
 from tenderfit.config import settings
-from tenderfit.db import Conn
+from tenderfit.db import Conn, must
 from tenderfit.documents import service as docs
 from tenderfit.llm import LLM
 from tenderfit.rules import aggregate as agg
 from tenderfit.rules.engine import NEEDS, NOT_MET, Context
-from tenderfit.simulation import store
+from tenderfit.simulation import inputs, store
 from tenderfit.simulation.changes import SimulationConflict, SimulationError
 from tenderfit.simulation.compare import Row, summarise
 from tenderfit.simulation.impact import reach
@@ -35,6 +39,8 @@ from tenderfit.simulation.scenario import Scenario, apply_changes
 from tenderfit.simulation.snapshot import Snapshot
 
 STALE_RUNNING_MINUTES = 30
+RUN_LOCK = 0x53494D  # namespace of the two-key advisory locks held by running simulations ("SIM")
+INTERRUPTED = "interrupted: the run stopped before it finished"
 REQUIREMENT_FIELDS = ("statement", "quote", "category", "obligation", "evidence_needed", "equivalent_allowed", "passage_id")
 
 
@@ -59,8 +65,35 @@ def default_config() -> PipelineConfig:
     return PipelineConfig("B3" if settings.agent_enabled else "B2", agent=settings.agent_enabled)
 
 
+def _lock_key(simulation_id: int) -> tuple[int, int]:
+    return RUN_LOCK, simulation_id % 2147483647  # the two-key form takes int4s; a collision only makes recovery wait
+
+
 def run(conn: Conn, profile_id: int, simulation_id: int, config: PipelineConfig | None = None, selective: bool = True) -> dict:
     require_idle(conn)
+    got = conn.execute("SELECT pg_try_advisory_lock(%s, %s) AS got", _lock_key(simulation_id)).fetchone()
+    conn.rollback()  # the lock is the session's, not the transaction's: it outlives this rollback
+    if not (got and got["got"]):
+        status = store.get(conn, profile_id, simulation_id)["status"]  # SimulationNotFound for another supplier
+        conn.rollback()
+        raise SimulationConflict(f"a simulation runs once; this one is {status}")
+    try:
+        return _run_locked(conn, profile_id, simulation_id, config, selective)
+    finally:
+        _unlock(conn, simulation_id)
+
+
+def _unlock(conn: Conn, simulation_id: int) -> None:
+    """Released after the final status is committed. If the connection is gone, so is the lock."""
+    try:
+        conn.rollback()
+        conn.execute("SELECT pg_advisory_unlock(%s, %s)", _lock_key(simulation_id))
+        conn.rollback()
+    except Exception:
+        pass
+
+
+def _run_locked(conn: Conn, profile_id: int, simulation_id: int, config: PipelineConfig | None, selective: bool) -> dict:
     try:
         started = conn.execute(
             """UPDATE simulation SET status = 'running', started_at = now()
@@ -98,15 +131,37 @@ def _mark_failed(conn: Conn, simulation_id: int, stage: str, error: BaseExceptio
         conn.rollback()
 
 
-def recover_stale_simulations(conn: Conn, minutes: int = STALE_RUNNING_MINUTES) -> int:
-    """A process that died mid-run cannot mark its simulation failed, and a running simulation cannot be discarded."""
+def close_abandoned_runs(conn: Conn, profile_id: int | None = None, simulation_id: int | None = None,
+                         older_than_minutes: int | None = None) -> int:
+    """Close running simulations whose run is no longer alive, so they can be discarded. Returns how many were closed.
+
+    A process that died mid-run cannot mark its simulation failed. Its run lock went with its connection, so a running
+    simulation whose lock can be taken has no live run. One whose lock is held is left alone, however old it is. The
+    transaction-level lock taken here also makes concurrent recoveries close each run once."""
     require_idle(conn)
-    n = conn.execute(
-        """UPDATE simulation SET status = 'failed', finished_at = now(), error_stage = 'interrupted',
-                  error = 'interrupted: the run stopped before it finished'
-           WHERE status = 'running' AND started_at < now() - make_interval(mins => %s)""", (minutes,)).rowcount
-    conn.commit()
-    return n
+    try:
+        ids = [r["id"] for r in conn.execute(
+            """SELECT id FROM simulation WHERE status = 'running' AND (%s::bigint IS NULL OR profile_id = %s)
+                 AND (%s::bigint IS NULL OR id = %s)
+                 AND (%s::int IS NULL OR started_at < now() - make_interval(mins => %s)) ORDER BY id""",
+            (profile_id, profile_id, simulation_id, simulation_id, older_than_minutes, older_than_minutes))]
+        closed = 0
+        for sid in ids:
+            if not must(conn.execute("SELECT pg_try_advisory_xact_lock(%s, %s) AS got", _lock_key(sid)).fetchone())["got"]:
+                continue  # a live run holds it
+            closed += conn.execute(
+                """UPDATE simulation SET status = 'failed', finished_at = now(), error_stage = 'interrupted', error = %s
+                   WHERE id = %s AND status = 'running'""", (INTERRUPTED, sid)).rowcount
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    return closed
+
+
+def recover_stale_simulations(conn: Conn, minutes: int = STALE_RUNNING_MINUTES) -> int:
+    """All suppliers' abandoned runs older than `minutes`, for a periodic sweep. A run that is still alive is never closed."""
+    return close_abandoned_runs(conn, older_than_minutes=minutes)
 
 
 def impact(conn: Conn, sim: dict, snap: Snapshot, simulated: Scenario) -> tuple[dict[int, list[dict]], dict[int, list[dict]]]:
@@ -141,6 +196,13 @@ def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineC
                                              ([r["id"] for r in snap.requirements],))}
     overridden = overrides(conn, profile_id)
     reached, stale = impact(conn, sim, snap, simulated)
+    baseline = must(conn.execute("SELECT recommendation, finished_at, created_at FROM assessment WHERE id = %s",
+                                 (snap.assessment_id,)).fetchone())
+    # Read in this same REPEATABLE READ transaction, so the provenance is exactly what control and simulated used.
+    at_creation = sim["drift"].get("live_inputs_at_creation")
+    at_run = inputs.read(conn, snap)
+    since_creation = inputs.compare(at_creation, at_run)
+    since_baseline = inputs.since_baseline(conn, snap, baseline["finished_at"] or baseline["created_at"])
     rows, vs_control, vs_simulated = [], [], []
     for req in snap.requirements:
         row = live.get(req["id"])
@@ -156,6 +218,12 @@ def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineC
             r.notes.append("the wording changed: only the model can read new wording")
         if c is None and stale.get(req["id"]):
             r.notes.append("baseline may be out of date: " + "; ".join(x["detail"] for x in stale[req["id"]]))
+        for when, entries in (("since this simulation was created", since_creation), ("since the baseline ran", since_baseline)):
+            for e in entries:
+                if e["requirement_id"] in (req["id"], None) and e["input"] != "all":
+                    r.input_drift.append({**e, "since": "creation" if when.endswith("created") else "baseline"})
+                    if e["requirement_id"] == req["id"]:
+                        r.notes.append(f"{when}, {e['detail']}; control and simulated both use the current value")
         rows.append(r)
         is_overridden = any(i in overridden for i in _lineage(conn, row))
         label = _source_label(conn, row)
@@ -164,9 +232,18 @@ def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineC
     inv = docs.inventory(conn, snap.version_id, profile_id)
     rec_control = lot_dimensions(conn, snap.version_id, profile_id, vs_control, inv, control.facts, _ctx(control), config)
     rec_simulated = lot_dimensions(conn, snap.version_id, profile_id, vs_simulated, inv, simulated.facts, _ctx(simulated), config)
-    baseline = conn.execute("SELECT recommendation FROM assessment WHERE id = %s", (snap.assessment_id,)).fetchone()
-    return rows, summarise(rows, baseline["recommendation"] if baseline else None, rec_control.recommendation,
-                           rec_simulated.recommendation, config.name)
+    execution = {
+        "snapshot_sha256": sim["snapshot_sha256"],  # covers the frozen part only
+        "frozen": list(inputs.FROZEN),
+        "live_inputs": {name: {"tables": list(inputs.TABLES[name]), "at_run": d["sha256"],
+                               "at_creation": ((at_creation or {}).get(name) or {}).get("sha256"),
+                               "changed": ((at_creation or {}).get(name) or {}).get("sha256") != d["sha256"]}
+                        for name, d in at_run.items()},
+        "transaction": "control and simulated were read in one REPEATABLE READ, READ ONLY transaction",
+    }
+    return rows, summarise(rows, baseline["recommendation"], rec_control.recommendation, rec_simulated.recommendation,
+                           config.name, input_drift={"since_creation": since_creation, "since_baseline": since_baseline},
+                           execution=execution)
 
 
 def _ctx(s: Scenario) -> Context:
@@ -212,7 +289,7 @@ def _record(conn: Conn, simulation_id: int, rows: list[Row], summary: dict) -> N
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
             (simulation_id, r.requirement_id, r.baseline_verdict_id, r.baseline_status, r.control_status, r.simulated_status,
              r.how, Jsonb({"simulated": r.simulated, "control": r.control, "reached": r.reached, "effect": r.effect,
-                           "drift": r.drift, "notes": r.notes})))
+                           "drift": r.drift, "notes": r.notes, "input_drift": r.input_drift})))
     done = conn.execute("""UPDATE simulation SET status = 'completed', finished_at = now(), summary = %s
                            WHERE id = %s AND status = 'running' RETURNING id""", (Jsonb(summary), simulation_id)).fetchone()
     if not done:

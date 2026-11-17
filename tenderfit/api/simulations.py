@@ -10,7 +10,11 @@ and to map the package's errors to status codes:
   SimulationError      422  an invalid title or change; the message names the change and the field
 
 Every response carrying simulation data says it is hypothetical. There is deliberately no route that applies a
-simulation to the live assessment."""
+simulation to the live assessment.
+
+Before reading or acting on a simulation, its abandoned run (if any) is closed: a run whose process died stays `running`
+otherwise, and could never be discarded. engine.close_abandoned_runs never closes a run that is still alive. It writes
+only the simulation's own status, so even a GET touches nothing live."""
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -80,10 +84,17 @@ def _detail(conn: Conn, row: dict) -> dict:
         "baseline": {"assessment_id": row["baseline_assessment_id"], "version_id": row["version_id"],
                      "recommendation": a.get("recommendation"), "superseded": a.get("superseded")},
         "as_of": row["as_of"], "snapshot_sha256": row["snapshot_sha256"], "engine_version": row["engine_version"],
-        "drift": row["drift"], "changes": row["changes"], "summary": row["summary"], "failure": _failure(row),
+        # What changed since the baseline, as seen at creation. The digests of the live inputs recorded at creation stay
+        # internal; summary.execution reports, after a run, whether each input changed between creation and run.
+        "drift": {k: v for k, v in row["drift"].items() if k != "live_inputs_at_creation"}, "changes": row["changes"], "summary": row["summary"], "failure": _failure(row),
         "created_by": row["created_by"], "created_at": row["created_at"], "started_at": row["started_at"],
         "finished_at": row["finished_at"], "discarded_at": row["discarded_at"],
     }
+
+
+def _recover(conn: Conn, profile_id: int, simulation_id: int | None = None) -> None:
+    """Close this supplier's abandoned runs (one simulation's, or all of them) before they are shown or acted on."""
+    engine.close_abandoned_runs(conn, profile_id, simulation_id)
 
 
 def _get(conn: Conn, profile_id: int, simulation_id: int) -> dict:
@@ -104,6 +115,8 @@ def list_simulations(lot_id: int, include_discarded: bool = False, limit: int = 
                      profile_id: int = Depends(current_profile)) -> dict:
     with _sim() as conn:
         _lot(conn, lot_id)
+        conn.rollback()
+        _recover(conn, profile_id)
         rows = store.list_for_profile(conn, profile_id, include_discarded, lot_id=lot_id, limit=limit)
     return {"hypothetical": True, "notice": NOTICE, "simulations": rows}
 
@@ -119,6 +132,7 @@ def create_simulation(body: SimulationIn, profile_id: int = Depends(current_prof
 @router.get("/simulations/{simulation_id}")
 def get_simulation(simulation_id: int, profile_id: int = Depends(current_profile)) -> dict:
     with _sim() as conn:
+        _recover(conn, profile_id, simulation_id)
         return _get(conn, profile_id, simulation_id)
 
 
@@ -150,6 +164,7 @@ def preview(simulation_id: int, profile_id: int = Depends(current_profile)) -> d
 def run(simulation_id: int, profile_id: int = Depends(current_profile)) -> dict:
     """Synchronous and rules-only. Exactly one of two simultaneous runs starts; the other gets 409."""
     with _sim() as conn:
+        _recover(conn, profile_id, simulation_id)
         try:
             engine.run(conn, profile_id, simulation_id)
         except (SimulationConflict, SimulationNotFound):
@@ -165,6 +180,7 @@ def run(simulation_id: int, profile_id: int = Depends(current_profile)) -> dict:
 @router.get("/simulations/{simulation_id}/results")
 def results(simulation_id: int, profile_id: int = Depends(current_profile)) -> dict:
     with _sim() as conn:
+        _recover(conn, profile_id, simulation_id)
         row = store.get(conn, profile_id, simulation_id)
         if row["status"] != "completed":
             raise SimulationConflict(f"results exist only for a completed simulation; this one is {row['status']}")
@@ -180,6 +196,7 @@ def results(simulation_id: int, profile_id: int = Depends(current_profile)) -> d
             "drift": sim.get("drift", False), "reached": sim.get("reached", []),
             "reason_control": (sim.get("control") or {}).get("reason"),
             "reason_simulated": (sim.get("simulated") or {}).get("reason"), "notes": sim.get("notes", []),
+            "input_drift": sim.get("input_drift", []),
         })
     return {"hypothetical": True, "notice": NOTICE, "simulation_id": simulation_id, "summary": row["summary"], "results": out}
 
@@ -187,6 +204,7 @@ def results(simulation_id: int, profile_id: int = Depends(current_profile)) -> d
 @router.post("/simulations/{simulation_id}/discard")
 def discard(simulation_id: int, profile_id: int = Depends(current_profile)) -> dict:
     with _sim() as conn:
+        _recover(conn, profile_id, simulation_id)
         store.discard(conn, profile_id, simulation_id)
         return _get(conn, profile_id, simulation_id)
 

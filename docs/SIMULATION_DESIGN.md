@@ -318,7 +318,7 @@ Out of scope, reported separately: the Mode A issue where `confirm._verdict()` a
    `decide(interpret=False)` for each requirement on each, and compute both recommendations;
 3. one transaction: insert `simulation_result` rows and set `completed` with the summary.
 A failure in 2 or 3 rolls back and marks the run `failed` with `error_stage` (`evaluation` / `recording`), then re-raises.
-`recover_stale_simulations()` closes runs whose process died. It isn't scheduled anywhere yet.
+`recover_stale_simulations()` closes runs whose process died. Since §13 it uses the run lock, so it never closes a live run.
 
 The model is replaced by `NO_MODEL`, which raises if called. A requirement whose wording changed, or that only the model
 can decide, is recorded `how = "needs_model"` with a NULL status. For the recommendation it keeps its baseline verdict in
@@ -327,9 +327,10 @@ both control and simulated, and the summary says `complete: false`.
 **`tenderfit/simulation/compare.py`** (pure): effect = control → simulated; drift = baseline → control. `touched` is
 computed from the facts and fields the decisions actually used. Stage 6 replaces this with the recorded dependencies.
 
-**What a run still reads live** (identical for control and simulated, so it can't create a false effect): the requirement
-row's references and lineage, answered questions, overrides, the document inventory and rejected requirements. These are
-read at run time, not snapshotted, and can differ from what the baseline saw.
+**What a run still reads live:** the requirement row's references and lineage, answered questions, overrides, the document
+inventory and rejected requirements. These are read at run time, not snapshotted, and can differ from what the baseline
+saw. Since §13 they are tracked, reported as input drift when they change, and read in one REPEATABLE READ transaction,
+so control and simulated see exactly the same values.
 
 ---
 
@@ -465,3 +466,85 @@ into this package, with the supplier taken from the session. Errors map to:
 It's the only module outside the package that imports it, and the boundary test now names it as the single allowed
 entry point. Nothing promotes a simulation into the live assessment. `docs/SIMULATION_API_PLAN.md` §12 has the routes
 and how they were verified.
+
+---
+
+## 13. Review fixes: abandoned runs (M1) and live-input drift (M2)
+
+### M1: a run whose process died could never be discarded
+
+**Root cause.**
+- `engine.run` marks a simulation `running`, evaluates, then commits `completed` or `failed`. If the process dies in
+  between, nothing marks it, and `store.discard` refuses a `running` simulation.
+- The only recovery function, `recover_stale_simulations`, had no caller, and it judged liveness by age alone, so a slow
+  live run older than its threshold would have been closed.
+
+**Fix.**
+- `engine.run` takes a session-level advisory lock, `pg_try_advisory_lock(RUN_LOCK, id)`, on its own connection before
+  the `created → running` update. It holds the lock until after the final status is committed, and releases it on every
+  path. A connection that dies releases it too, because Postgres drops the session's locks.
+- `engine.close_abandoned_runs(conn, profile_id?, simulation_id?, older_than_minutes?)` marks a `running` simulation
+  `failed` (stage `interrupted`) only if it can take that lock in its own transaction:
+  - a held lock means a live run, which is never closed, however old;
+  - the transaction-level lock also makes concurrent recoveries close each run exactly once.
+- `recover_stale_simulations` now delegates to it with an age filter, which makes it safe for a periodic sweep.
+- The API runs `close_abandoned_runs` for the acting supplier before list, detail, run, results and discard. It writes
+  only the simulation's own status, so even a GET touches nothing live. Abandoned runs are found without a new worker,
+  service or table.
+
+**Limits.**
+- It relies on a direct Postgres session per run. A transaction-pooling proxy (for example PgBouncer in transaction
+  mode) would break session-level advisory locks; none is used today.
+- A process that hangs without dying keeps its lock, so its run stays `running`. That's correct, since it can't be told
+  apart from a slow run.
+- Lock keys are the simulation id modulo 2³¹−1. A collision can only make recovery wait, or a run of the other
+  simulation get a 409.
+
+### M2: the creation-time snapshot was not the whole execution context
+
+**What is frozen and what is read live.** The snapshot (and `snapshot_sha256`, whose meaning is unchanged) covers only
+supplier facts, requirement wording and conditions, tender fields and `as_of`. A run also reads these live tables,
+listed in `simulation/inputs.py` (`TABLES`):
+
+| Input | Tables | Scope |
+|---|---|---|
+| overrides | `confirmation` (point G6) | per requirement, via its lineage |
+| answers | `question` | per requirement, via its lineage |
+| requirements | `requirement` | per requirement |
+| documents | `document_ref`, `document_ref_state`, `document`, `passage` | lot |
+| rejections | `requirement_rejection` | lot |
+| baseline_record | `assessment`, `verdict`, `dependency` | lot; it should never change, so it is checked rather than assumed |
+
+A test records every SQL statement a run executes. It fails if a run reads a live table that isn't in this list, so a
+new live read can't go unreported.
+
+**The fix.**
+1. *Same inputs for control and simulated.* `isolation.read_only` now opens a REPEATABLE READ, READ ONLY transaction,
+   so every statement of the evaluation sees one database state. Before, under READ COMMITTED, an answer committed
+   between the control and simulated decisions of one requirement could produce a false effect. A test commits one at
+   exactly that moment.
+2. *Provenance.*
+   - At creation, `inputs.read` stores a digest of each input (per requirement where attributable) in the simulation's
+     `drift`, as `live_inputs_at_creation`; migration 019's guard makes `drift` impossible to rewrite. The API leaves
+     these digests out of the detail's `drift`.
+   - At run time, the same digests are read in the evaluation's own transaction, so they describe exactly what was used.
+   - `summary.execution` reports the snapshot hash, what it freezes, and for each live input its tables, its digest at
+     creation and at run time, and whether it changed.
+3. *Drift that moves no status.*
+   - `summary.input_drift.since_creation` lists inputs that changed between creation and run.
+   - `summary.input_drift.since_baseline` lists overrides and answers recorded after the baseline ran.
+   - `summary.recommendation.drift` is true when the control recommendation differs from the baseline's, even if no
+     requirement's status moved. For example, an override changes only how a not-met verdict is aggregated.
+   - Each result row carries `input_drift` and a note, so a requirement whose status stayed `not_met` still says that an
+     override was recorded.
+   - A simulation created before this change reports `input: "all"`: changes since creation can't be detected for it.
+
+**Guarantees, stated exactly.**
+- The snapshot hash proves the frozen part.
+- `summary.execution` proves which live state the run used.
+- Input drift reports changes to the tracked inputs, since creation (by digest) and since the baseline (overrides and
+  answers, by timestamp).
+- Changes to documents or rejections before creation are not dated, so they show up only in the baseline-vs-control
+  recommendation.
+- The effect (control → simulated) is unaffected by any of this: both sides always read the same inputs.
+
