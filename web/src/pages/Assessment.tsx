@@ -4,6 +4,8 @@ import { usePageTitle, useProfile } from "../App";
 import { api, daysLeft, fmtDate, post } from "../api";
 import { ProgressBanner } from "../components/ProgressBanner";
 import { SourceDialog, type SourceRef } from "../components/SourceDialog";
+import { AskPanel } from "../whatif/AskPanel";
+import { SimulationList } from "../whatif/SimulationList";
 import { Card, DeciderTag, Empty, ErrorNote, EvidencePill, Fictional, Icon, OppStatus, QualityTag, Skeleton, Tabs, Tag, Tile, Toast, VerdictPill, deciderExplain, human } from "../components/ui";
 
 const LEVEL: Record<string, [string, string]> = { strong: ["Strong", "info"], partial: ["Partial", "warn"], low: ["Low", "bad"] };
@@ -57,7 +59,7 @@ export default function Assessment() {
   const [inv, setInv] = useState<any>(null);
   const [loaded, setLoaded] = useState(false);
   const [sel, setSel] = useState<number | null>(null);
-  const [tab, setTab] = useState<"reqs" | "docs">("reqs");
+  const [tab, setTab] = useState<"reqs" | "docs" | "sims">("reqs");
   const [showMet, setShowMet] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -215,12 +217,16 @@ export default function Assessment() {
           <Tile label="Open questions" value={dims.open_questions.count ? `${dims.open_questions.count} for you` : "None"} tone="info" detail={dims.open_questions.items[0]} />
         </div>
       </Card>}
+      {hasResult && <AskPanel lotId={String(lotId)} assessmentId={a.assessment_id}
+        disabled={processing ? "This assessment is being updated. You can ask a what-if question once it finishes." : undefined} />}
 
       {(hasResult || inv) && <Card flush>
         <Tabs label="Assessment sections" value={hasResult ? tab : "docs"} onChange={setTab} tabs={[
           ...(hasResult ? [{ id: "reqs" as const, label: "Requirements", count: reqs.length }] : []),
           { id: "docs" as const, label: `Documents${inv ? ` · ${essential.length - unread.length} of ${essential.length} essential read` : ""}` },
+          ...(hasResult ? [{ id: "sims" as const, label: "What-ifs" }] : []),
         ]} />
+        {hasResult && tab === "sims" && <SimulationList lotId={String(lotId)} />}
 
         {hasResult && tab === "reqs" && (reqs.length === 0 ? <Empty title="No requirements found">Nothing in the documents read was recognised as a requirement. Check the documents yourself.</Empty> : (
           <div className="split" style={{ padding: "0 0 4px" }}>

@@ -10,6 +10,7 @@ import Opportunities from "./pages/Opportunities";
 import Preparation from "./pages/Preparation";
 import Profile from "./pages/Profile";
 import Tender from "./pages/Tender";
+import SimulationPage from "./whatif/SimulationPage";
 
 export type Profile = { id: number; name: string; regions: string[]; description: string; is_fictional: boolean };
 type Me = { email: string; profiles: Profile[]; active_profile_id: number | null };
@@ -99,6 +100,7 @@ export default function App() {
               <Route path="/opportunities" element={<Opportunities />} />
               <Route path="/tenders/:tenderId" element={<Tender />} />
               <Route path="/lots/:lotId" element={<Assessment />} />
+              <Route path="/lots/:lotId/simulations/:simId" element={<SimulationPage />} />
               <Route path="/changes" element={<Changes />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/preparation" element={<Preparation />} />
