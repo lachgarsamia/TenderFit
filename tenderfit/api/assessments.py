@@ -385,10 +385,14 @@ def job(job_id: int, profile_id: int = Depends(current_profile)):
     with connect() as conn:
         j = conn.execute("""SELECT id, kind, status, attempts, last_error, created_at, finished_at FROM job
                             WHERE id = %s AND (payload->>'profile_id')::bigint = %s""", (job_id, profile_id)).fetchone()
-    if not j:
-        raise HTTPException(404, "job not found")
+        if not j:
+            raise HTTPException(404, "job not found")
+        waiting = queue.waiting_behind(conn, j["id"]) if j["kind"] in queue.LOW_PRIORITY else None
     lines = (j["last_error"] or "").strip().splitlines()
-    return {**j, "last_error": lines[-1][:500] if lines else None}
+    out = {**j, "last_error": lines[-1][:500] if lines else None}
+    if j["kind"] in queue.LOW_PRIORITY:
+        out["waiting_behind"] = waiting  # how many jobs will be claimed before this one; 0 once it is running or done
+    return out
 
 
 def _snippet(old: str, new: str, context: int = 4) -> tuple[str, str]:

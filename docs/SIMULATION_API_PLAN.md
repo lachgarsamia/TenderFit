@@ -543,3 +543,82 @@ No migration, no new dependency, and no change to the queue, worker, LLM client 
 - `created` drafts accumulate until discarded, and the 7-day hiding of §6 isn't implemented.
 - A run is synchronous; at real lot sizes (20–80 requirements) it's still well under a second.
 
+
+## 13. Phase 2 as built
+
+Branch `feature/simulation-agent-jobs`, stacked on phase 1 (`feature/simulation-api`). The job table, queue and single
+worker are unchanged in kind; nothing new runs.
+
+**Shared infrastructure, unchanged for Mode A.**
+- `queue.enqueue(..., max_attempts=None)`: `None` keeps the table default (5). What-if jobs use 1.
+- `queue.claim()` orders by `(kind = ANY(LOW_PRIORITY)), run_after, id`. With no agent job queued the order is as before.
+- `AnthropicLLM.tool_turn(..., *, timeout, max_retries, max_tokens)` applies them to one call through the SDK's
+  `with_options`. Left out, a call keeps the client's 300 s timeout, 4 retries and 16000 tokens. The `LLM` protocol is
+  unchanged. `RecordedLLM` and `DemoLLM` accept the options.
+- Provider errors carry `may_have_billed`: set for timeouts, connection failures, 5xx and 408; clear for other 4xx. A
+  response that arrived but was unusable (`max_tokens`, refusal) carries its real `usage`.
+
+**Agent.** `agent.ask` is split into `begin` (create the simulation and record the question, in the request) and
+`investigate` (the loop, in the worker); `ask` is still both. Before every model call, in this order:
+- the session's own `Budget` (cost cap `simulation_agent_session_usd`, time cap the deadline) and the 12-call limit;
+- the deadline: under 15 s left ends the session `budget`; otherwise the call's timeout is
+  `min(remaining − 5 s, llm_timeout_s)`, with `max_retries=0` and `max_tokens=4096`;
+- `spend.admit_call`, under the supplier's advisory lock: the rolling 24 h spend, and this session's, plus the call's
+  worst case must fit $5.00 and $0.50.
+
+A failed call is an `llm_error` step. It costs the real usage if a response arrived; the worst case (estimated input plus
+`max_tokens` output, `cost_estimated: true`) if it may have been billed; nothing if the provider refused it. A model
+client whose `tool_turn` doesn't accept the bounds (the test fakes) is called exactly as before.
+
+**Worker.** A `simulation_agent` handler runs `investigate` with `default_llm()`. A simulation that's no longer waiting
+(discarded, or already investigated) is skipped with no model call. `run_once` also calls `recover_stale_simulations`.
+The boundary allow-list gains `tenderfit/jobs/worker.py`.
+
+**API.**
+
+| Route | Behaviour |
+|---|---|
+| `POST /assessments/{id}/what-if` `{question, as_of?}` | 202 `{simulation_id, job_id}`. 409 with the active ids if the supplier already has a question queued or running; 429 with `Retry-After` if the day's allowance can't cover a session (body: `remaining_usd`, `next_question_at`); 429 with `Retry-After: 30` if 20 agent jobs are queued; 404 for another supplier's assessment; 422 for an empty or over-long question. |
+| `GET /what-if/allowance` | the daily allowance, spend, remaining, whether a question can be asked now and when, and the active question if any |
+| `GET /simulations/{id}/trace` | `{hypothetical, notice, simulation_id, job: {id, status}?, outcome?, steps: [{step, tool, input, output, model, tokens, cost_usd, cost_estimated, created_at}]}` |
+| `GET /jobs/{id}` | adds `waiting_behind` for agent jobs only: running jobs, ready jobs of other kinds and agent jobs ahead of it; 0 once it runs |
+| changes, run | 409 while the agent's job for that simulation is queued or running. Discard is always allowed; the agent then stops. |
+
+**Where this differs from §2–§4, and why.**
+- Admission holds a **session-level** advisory lock rather than a transaction-level one, because `store.create` commits
+  its own transaction. The lock is released in a `finally`, after a rollback of anything uncommitted.
+- A running agent job is treated as stale after **10 minutes**, not 1 hour (`queue.AGENT_STALE_AFTER`). A session can't
+  legitimately run that long, and with `max_attempts=1` it's failed, never rerun, so the supplier can ask again sooner.
+  Other kinds keep 1 hour.
+- The trace is an object, not a bare list, so it carries `hypothetical` like every other simulation response.
+- The `agent` fields in the list and detail responses (§3) are **not** added: `trace` and `GET /jobs` give the same
+  information, and the phase 1 responses stay as they are. Add them in phase 3 if the frontend needs them.
+- `as_of` is accepted on the what-if body, as it is on `POST /simulations`.
+- Manual changes and runs are refused while the agent works on a simulation. The plan didn't specify this. Without it,
+  a person and the agent could race on one simulation's changes.
+
+**Known limits.**
+- The global ceiling of 20 is checked under the supplier's lock, not a global one, so simultaneous questions from
+  different suppliers can exceed it by a few.
+- The SDK's timeout bounds each network phase, not total wall time; a non-streamed response sends nothing until it's
+  complete, so in practice it bounds the call.
+- The deadline is checked before model calls. A tool (the rules run) that starts just before it can finish after it.
+- The worst-case input estimate (characters ÷ 3) could undercount unusual text, such as non-Latin scripts.
+- One worker: a ready assessment can wait for one agent session in progress (about 155 s), never for queued ones.
+- Not yet done: the live smoke test through the API (it needs an API key and spends real money).
+
+**Tests:** `tests/test_simulation_agent_jobs.py` (30 tests). The suite runs 531 tests with 0 skipped. Existing worker,
+queue, LLM and agent tests are unedited. The only edits to existing tests are registrations: `test_auth.PROTECTED`, the
+`routes()` list in `test_simulation_api.py`, and the boundary allow-list. Reverting each safeguard makes tests fail:
+
+| Safeguard reverted | Tests failed |
+|---|---|
+| claim order ignores priority | 2 |
+| `max_attempts` dropped | 4 |
+| no one-per-supplier check | 2 |
+| supplier lock is a no-op | 1 |
+| per-call spend never refuses | 1 |
+| no deadline check | 1 |
+| per-call bounds never passed | 4 |
+| failed call costs nothing | 1 |
+| manual change allowed while the agent works | 1 |

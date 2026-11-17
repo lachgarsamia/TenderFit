@@ -23,6 +23,21 @@ class OutputTooLong(LLMError):
     """The response hit max_tokens. A smaller request can succeed."""
 
 
+def _provider_error(message: str, may_have_billed: bool) -> LLMError:
+    """may_have_billed: the request may have reached the model and been charged (a timeout, a dropped connection, a
+    server-side error), so a spend account should assume it was. False for a request the provider refused outright."""
+    e = LLMError(message)
+    e.may_have_billed = may_have_billed  # type: ignore[attr-defined]
+    return e
+
+
+def _billed(e: LLMError, usage: "Usage") -> LLMError:
+    """A response that arrived but cannot be used was still charged: its usage goes with the error."""
+    e.may_have_billed = True  # type: ignore[attr-defined]
+    e.usage = usage  # type: ignore[attr-defined]
+    return e
+
+
 @dataclass
 class Usage:
     model: str
@@ -98,21 +113,24 @@ class AnthropicLLM:
                                                    timeout=settings.llm_timeout_s)
         return self._client
 
-    def _create(self, **kw):
+    def _create(self, call_options: dict | None = None, **kw):
+        """call_options: per-call client options (timeout, max_retries). None keeps the client's own: Mode A's path."""
         start = time.monotonic()
+        client = self.client.with_options(**call_options) if call_options else self.client
         try:
-            r = self.client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kw)
+            r = client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kw)
         except self.anthropic.APIStatusError as e:
-            raise LLMError(f"provider error {e.status_code}: {e.message}") from e
-        except self.anthropic.APIConnectionError as e:
-            raise LLMError(f"provider unreachable: {e}") from e
+            raise _provider_error(f"provider error {e.status_code}: {e.message}",
+                                  e.status_code >= 500 or e.status_code == 408) from e
+        except self.anthropic.APIConnectionError as e:  # includes APITimeoutError
+            raise _provider_error(f"provider unreachable: {e}", True) from e
         u = r.usage
         usage = Usage(r.model, u.input_tokens or 0, u.output_tokens or 0, getattr(u, "cache_read_input_tokens", 0) or 0,
                       int((time.monotonic() - start) * 1000), r.stop_reason)
         if r.stop_reason == "refusal":
-            raise LLMError("model declined the request")
+            raise _billed(LLMError("model declined the request"), usage)
         if r.stop_reason == "max_tokens":
-            raise OutputTooLong("model output hit max_tokens")
+            raise _billed(OutputTooLong("model output hit max_tokens"), usage)
         return r, usage
 
     def json(self, role: str, system: str, user: str, schema: dict) -> JsonResult:
@@ -128,9 +146,13 @@ class AnthropicLLM:
         except json.JSONDecodeError as e:
             raise LLMError(f"model returned invalid JSON: {e}") from e
 
-    def tool_turn(self, role: str, system: str, messages: list[dict], tools: list[dict]) -> ToolTurn:
-        r, usage = self._create(model=_model(role), max_tokens=16000, system=system, messages=messages,
-                                tools=[{**t, "strict": True} for t in tools],
+    def tool_turn(self, role: str, system: str, messages: list[dict], tools: list[dict], *, timeout: float | None = None,
+                  max_retries: int | None = None, max_tokens: int | None = None) -> ToolTurn:
+        """The keyword options bound one call (the what-if agent passes them). Left out, a call is exactly as before:
+        the client's 300 s timeout and 4 retries, and 16000 output tokens."""
+        options = {k: v for k, v in (("timeout", timeout), ("max_retries", max_retries)) if v is not None}
+        r, usage = self._create(options or None, model=_model(role), max_tokens=max_tokens or 16000, system=system,
+                                messages=messages, tools=[{**t, "strict": True} for t in tools],
                                 output_config={"effort": settings.llm_effort})
         calls = [ToolCall(b.id, b.name, dict(b.input)) for b in r.content if b.type == "tool_use"]
         text = "".join(b.text for b in r.content if b.type == "text")
@@ -169,14 +191,16 @@ class RecordedLLM:
             return res
         return JsonResult(hit["data"], Usage(**hit["usage"]))
 
-    def tool_turn(self, role: str, system: str, messages: list[dict], tools: list[dict]) -> ToolTurn:
+    def tool_turn(self, role: str, system: str, messages: list[dict], tools: list[dict], **call_options) -> ToolTurn:
+        """call_options (timeout, max_retries, max_tokens) reach the live model only; a replay has nothing to bound."""
         key = _key(role, [system, messages])
         self.calls.append(key)
         hit = self._load().get(key)
         if hit is None:
             if not self.live:
                 raise LLMError(f"no recorded response for {role} request {key}")
-            t = self.live.tool_turn(role, system, messages, tools)
+            t = (self.live.tool_turn(role, system, messages, tools, **call_options) if call_options  # type: ignore[call-arg]
+                 else self.live.tool_turn(role, system, messages, tools))
             self._save(key, {"text": t.text, "calls": [c.__dict__ for c in t.calls], "raw": t.raw_content,
                              "usage": t.usage.__dict__, "stop_reason": t.stop_reason})
             return t
