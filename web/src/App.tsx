@@ -10,6 +10,8 @@ import Opportunities from "./pages/Opportunities";
 import Preparation from "./pages/Preparation";
 import Profile from "./pages/Profile";
 import Tender from "./pages/Tender";
+import ComparePage from "./whatif/ComparePage";
+import ScenarioBuilderPage from "./whatif/ScenarioBuilder";
 import SimulationPage from "./whatif/SimulationPage";
 
 export type Profile = { id: number; name: string; regions: string[]; description: string; is_fictional: boolean };
@@ -101,6 +103,8 @@ export default function App() {
               <Route path="/tenders/:tenderId" element={<Tender />} />
               <Route path="/lots/:lotId" element={<Assessment />} />
               <Route path="/lots/:lotId/simulations/:simId" element={<SimulationPage />} />
+              <Route path="/lots/:lotId/scenarios/new" element={<ScenarioBuilderPage />} />
+              <Route path="/lots/:lotId/compare" element={<ComparePage />} />
               <Route path="/changes" element={<Changes />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/preparation" element={<Preparation />} />

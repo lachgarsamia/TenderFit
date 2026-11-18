@@ -38,6 +38,7 @@ export default function SimulationPage() {
   const inv = useInvestigation(id);
   const { sim, trace, job, results } = inv;
   const [discarding, setDiscarding] = useState(false);
+  const [running, setRunning] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   usePageTitle(sim ? `What if: ${sim.title ?? `simulation ${sim.id}`}` : "What if");
 
@@ -71,6 +72,14 @@ export default function SimulationPage() {
     try { await sims.discard(sim.id); inv.reload(); } catch (e) { setActionError(sims.refusal(e).message); } finally { setDiscarding(false); }
   };
 
+  // A scenario built by hand runs when the supplier says so; one the agent works on is run by the agent.
+  const canRun = !STATIC && sim.status === "created" && phase.kind === "manual";
+  const canVary = !STATIC && sim.status !== "discarded" && sim.status !== "running" && phase.kind !== "queued" && phase.kind !== "running";
+  const runIt = async () => {
+    setRunning(true); setActionError(null);
+    try { await sims.run(sim.id); } catch (e) { setActionError(sims.refusal(e).message); } finally { setRunning(false); inv.reload(); }
+  };
+
   return (
     <div className="hypothetical-page">
       <div className="crumb"><Link to={`/lots/${sim.lot_id}`}>← Back to your assessment</Link></div>
@@ -83,9 +92,12 @@ export default function SimulationPage() {
             <span>Simulated on {fmtDate(sim.created_at)}</span>
             <span>Judged as of {fmtDate(sim.as_of, false)}</span>
             <span>From <Link to={`/lots/${sim.lot_id}`}>your assessment</Link>{sim.baseline.recommendation ? `: ${sim.baseline.recommendation}` : ""}</span>
+            {sim.parent_id && <span>A variation of <Link to={`/lots/${sim.lot_id}/simulations/${sim.parent_id}`}>scenario {sim.parent_id}</Link>, on the same frozen copy</span>}
           </div>
         </div>
         <div className="actions">
+          {canRun && <button className="btn primary" disabled={running} onClick={runIt}>{running ? "Running…" : "Run this scenario"}</button>}
+          {canVary && <Link className="btn" to={`/lots/${sim.lot_id}/scenarios/new?from=${sim.id}`}>Try a variation</Link>}
           {canDiscard && <button className="btn" disabled={discarding} onClick={discard}>Discard</button>}
         </div>
       </div>
@@ -93,6 +105,9 @@ export default function SimulationPage() {
       {inv.error && <div className="error-note" role="alert">{inv.error} <button className="btn sm" onClick={inv.reload}>Try again</button></div>}
       <BaselineWarnings sim={sim} />
       <PhaseBanner phase={phase} lotId={sim.lot_id} />
+
+      {canRun && <div className="banner info" role="status"><span className="b-icon">i</span><div className="body">
+        <strong>Not run yet</strong><p>Run it to see the impact. Running uses the rules only, costs nothing and changes nothing live.</p></div></div>}
 
       {sim.changes.length > 0 && <Card title="The hypothesis" note={`${sim.changes.length} change${sim.changes.length > 1 ? "s" : ""}, applied to the frozen copy only`}>
         <ol className="hypothesis" aria-label="Hypothetical changes">{sim.changes.map((c, i) => <li key={i}>{describeChange(c, statement)}</li>)}</ol>

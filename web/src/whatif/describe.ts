@@ -62,18 +62,24 @@ function limitReason(reason?: string): string {
   return reason;
 }
 
-/** One hypothetical change in plain words. `statement` names a requirement when the page knows it. */
-export function describeChange(c: Change, statement?: (id: number) => string | undefined): string {
+export const EVIDENCE: Record<string, string> = {
+  document_on_file: "Document on file", declared: "Declared by you", missing: "Missing", unknown: "Unknown", needs_update: "Needs updating",
+};
+export const evidenceLabel = (s: string) => EVIDENCE[s] ?? s.replace(/_/g, " ");
+
+/** One hypothetical change in plain words. `statement` names a requirement and `fact` a profile fact when the page knows them. */
+export function describeChange(c: Change, statement?: (id: number) => string | undefined, fact?: (id: number) => string | undefined): string {
   const req = (id: unknown) => statement?.(Number(id)) ? `"${statement(Number(id))}"` : `requirement ${id}`;
+  const f = (id: unknown) => fact?.(Number(id)) ? `"${fact(Number(id))}"` : `Profile fact ${id}`;
   switch (c.kind) {
     case "set_condition_bound": return `${req(c.requirement_id)}: the limit becomes ${c.bound}`;
     case "set_condition_match": return `${req(c.requirement_id)}: accepts ${String(c.match)}`;
     case "set_requirement_text": return `${req(c.requirement_id)}: reworded as "${String(c.statement)}"`;
-    case "set_fact_validity": return `Profile fact ${c.fact_id}: valid until ${c.valid_until ?? "no expiry"}`;
-    case "set_fact_evidence": return `Profile fact ${c.fact_id}: evidence becomes ${String(c.evidence_status).replace(/_/g, " ")}`;
-    case "set_fact_value": return `Profile fact ${c.fact_id}: ${String(c.key).replace(/_/g, " ")} becomes ${JSON.stringify(c.value)}`;
-    case "remove_fact": return `Profile fact ${c.fact_id} is taken away`;
-    case "add_fact": return `A new ${String(c.attribute)} fact is added: ${String(c.label)}`;
+    case "set_fact_validity": return `${f(c.fact_id)}: valid until ${c.valid_until ?? "no expiry"}`;
+    case "set_fact_evidence": return `${f(c.fact_id)}: evidence becomes ${evidenceLabel(String(c.evidence_status)).toLowerCase()}`;
+    case "set_fact_value": return `${f(c.fact_id)}: ${String(c.key).replace(/_/g, " ")} becomes ${JSON.stringify(c.value)}`;
+    case "remove_fact": return `${f(c.fact_id)} is taken away`;
+    case "add_fact": return `A new ${String(c.attribute).replace(/_/g, " ")} fact is added: ${String(c.label)}`;
     case "set_notice_field": return c.field === "notice.deadline" ? `The tender deadline becomes ${c.value}` : `The lot quantity becomes ${c.value}`;
     default: return c.kind.replace(/_/g, " ");
   }

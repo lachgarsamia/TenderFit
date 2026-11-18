@@ -3,6 +3,7 @@
 Every function is scoped to one supplier: a simulation or baseline of another supplier is reported as not found. Each
 mutating function owns its transaction (it requires an idle connection, commits on success and rolls back on any error),
 so a failure never leaves a half-written simulation and never touches the caller's own work."""
+import json
 from datetime import date
 
 from psycopg.types.json import Jsonb
@@ -22,27 +23,88 @@ from tenderfit.simulation.scenario import Scenario, apply_changes
 from tenderfit.simulation.snapshot import ENGINE_VERSION, Snapshot, take_snapshot
 
 DISCARDABLE = ("created", "completed", "failed")
+MAX_CHANGES = 25          # per simulation: a hypothesis, not a bulk edit
+MAX_CHANGE_BYTES = 4000   # one change as JSON; add_fact's free-form value is the only large field
+
+
+def _checked(changes: object) -> list[HypotheticalChange]:
+    """Parse a list of changes from untrusted input, bounded in number and size. Validation against a snapshot is
+    apply_changes's job; this only refuses what is malformed or oversized."""
+    if not isinstance(changes, list):
+        raise SimulationError("changes must be a list")
+    if len(changes) > MAX_CHANGES:
+        raise SimulationError(f"a simulation holds at most {MAX_CHANGES} changes")
+    return [_one(c, n) for n, c in enumerate(changes, start=1)]
+
+
+def _one(change: object, n: int | None = None) -> HypotheticalChange:
+    try:
+        size = len(json.dumps(change, default=str))
+    except (TypeError, ValueError):
+        raise SimulationError("invalid change: not JSON") from None
+    if size > MAX_CHANGE_BYTES:
+        raise SimulationError(f"change {n} is too large" if n else "this change is too large")
+    try:
+        return parse_change(change)
+    except SimulationError as e:
+        raise SimulationError(f"change {n}: {e}" if n else str(e)) from None
 
 
 def create(conn: Conn, profile_id: int, baseline_assessment_id: int, created_by: str, title: str | None = None,
-           as_of: date | None = None) -> int:
-    """A new simulation of one completed assessment. The baseline is read in a READ ONLY transaction."""
+           as_of: date | None = None, changes: list | None = None) -> int:
+    """A new simulation of one completed assessment, with an optional hypothesis. The baseline is read in a READ ONLY
+    transaction; the simulation and every change are written in one transaction, so an invalid change creates nothing."""
+    title, created_by = _who(title, created_by)
+    parsed = _checked(changes or [])
+    with read_only(conn):
+        snap, drift = take_snapshot(conn, profile_id, baseline_assessment_id, as_of)
+        # The live inputs the snapshot does not freeze, as they are now. drift cannot be updated later (019's guard).
+        drift = {**drift, "live_inputs_at_creation": inputs.read(conn, snap)}
+    apply_changes(snap, parsed)  # every change valid against the snapshot, in order, or SimulationError naming it
+    return _insert(conn, profile_id, snap, snap.sha256(), drift, title, created_by, parsed, parent_id=None)
+
+
+def create_variation(conn: Conn, profile_id: int, parent_id: int, created_by: str, title: str | None = None,
+                     changes: list | None = None) -> int:
+    """A new simulation decided on exactly the same frozen snapshot as `parent_id` (another of this supplier's), with its
+    own hypothesis. The parent is not touched. The live inputs are read afresh: they are what drift is measured from."""
+    title, created_by = _who(title, created_by)
+    parsed = _checked(changes or [])
+    with read_only(conn):
+        parent = _row(conn, profile_id, parent_id)
+        if parent["status"] == "discarded":
+            raise SimulationConflict("a discarded simulation cannot be varied")
+        snap = Snapshot.from_json(parent["snapshot"])
+        if snap.sha256() != parent["snapshot_sha256"]:
+            raise SimulationError("the stored snapshot does not match its hash")
+        drift = {**{k: v for k, v in parent["drift"].items() if k != "live_inputs_at_creation"},
+                 "live_inputs_at_creation": inputs.read(conn, snap)}
+    apply_changes(snap, parsed)
+    return _insert(conn, profile_id, snap, parent["snapshot_sha256"], drift, title, created_by, parsed, parent_id=parent_id)
+
+
+def _who(title: str | None, created_by: str) -> tuple[str | None, str]:
     title = (title or "").strip() or None
     if title and len(title) > 500:
         raise SimulationError("keep the title under 500 characters")
     if not created_by.strip():
         raise SimulationError("say who created the simulation")
-    with read_only(conn):
-        snap, drift = take_snapshot(conn, profile_id, baseline_assessment_id, as_of)
-        # The live inputs the snapshot does not freeze, as they are now. drift cannot be updated later (019's guard).
-        drift = {**drift, "live_inputs_at_creation": inputs.read(conn, snap)}
+    return title, created_by.strip()
+
+
+def _insert(conn: Conn, profile_id: int, snap: Snapshot, sha: str, drift: dict, title: str | None, created_by: str,
+            changes: list[HypotheticalChange], parent_id: int | None) -> int:
+    require_idle(conn)
     try:
         sid = must(conn.execute(
             """INSERT INTO simulation (profile_id, lot_id, baseline_assessment_id, version_id, title, as_of, snapshot,
-                                       snapshot_sha256, drift, engine_version, created_by)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                                       snapshot_sha256, drift, engine_version, created_by, parent_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
             (profile_id, snap.lot_id, snap.assessment_id, snap.version_id, title, snap.as_of, Jsonb(snap.to_json()),
-             snap.sha256(), Jsonb(drift), ENGINE_VERSION, created_by.strip())).fetchone())["id"]
+             sha, Jsonb(drift), ENGINE_VERSION, created_by, parent_id)).fetchone())["id"]
+        for ordinal, c in enumerate(changes, start=1):
+            conn.execute("INSERT INTO simulation_change (simulation_id, ordinal, kind, payload) VALUES (%s, %s, %s, %s)",
+                         (sid, ordinal, c.kind, Jsonb(dump_change(c))))
         conn.commit()
     except BaseException:
         conn.rollback()
@@ -70,8 +132,10 @@ def add_change(conn: Conn, profile_id: int, simulation_id: int, change: object) 
         row = _row(conn, profile_id, simulation_id, lock=True)  # serialises concurrent additions to one simulation
         if row["status"] != "created":
             raise SimulationConflict(f"changes can only be added before a simulation runs; this one is {row['status']}")
-        parsed = parse_change(change)
+        parsed = _one(change)
         existing = _changes(conn, simulation_id)
+        if len(existing) >= MAX_CHANGES:
+            raise SimulationError(f"a simulation holds at most {MAX_CHANGES} changes")
         apply_changes(Snapshot.from_json(row["snapshot"]), existing + [parsed])
         ordinal = len(existing) + 1
         conn.execute("INSERT INTO simulation_change (simulation_id, ordinal, kind, payload) VALUES (%s, %s, %s, %s)",
@@ -111,6 +175,7 @@ def list_for_profile(conn: Conn, profile_id: int, include_discarded: bool = Fals
     """Newest first. `lot_id` narrows the list to one lot; it never widens it beyond this supplier."""
     return conn.execute(
         """SELECT s.id, s.lot_id, s.baseline_assessment_id, s.version_id, s.status, s.title, s.as_of, s.created_by, s.created_at,
+                  s.parent_id, s.snapshot_sha256,
                   (SELECT count(*) FROM simulation_change c WHERE c.simulation_id = s.id) AS changes
            FROM simulation s WHERE s.profile_id = %s AND (%s OR s.status <> 'discarded') AND (%s::bigint IS NULL OR s.lot_id = %s)
            ORDER BY s.created_at DESC, s.id DESC LIMIT %s""",

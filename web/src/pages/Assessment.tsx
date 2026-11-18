@@ -226,7 +226,7 @@ export default function Assessment() {
           { id: "docs" as const, label: `Documents${inv ? ` · ${essential.length - unread.length} of ${essential.length} essential read` : ""}` },
           ...(hasResult ? [{ id: "sims" as const, label: "What-ifs" }] : []),
         ]} />
-        {hasResult && tab === "sims" && <SimulationList lotId={String(lotId)} />}
+        {hasResult && tab === "sims" && <SimulationList lotId={String(lotId)} assessmentId={a.assessment_id} />}
 
         {hasResult && tab === "reqs" && (reqs.length === 0 ? <Empty title="No requirements found">Nothing in the documents read was recognised as a requirement. Check the documents yourself.</Empty> : (
           <div className="split" style={{ padding: "0 0 4px" }}>
