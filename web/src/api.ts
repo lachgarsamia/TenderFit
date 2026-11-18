@@ -23,9 +23,22 @@ function fromSnapshot<T>(path: string, init?: RequestInit): T {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  /** info: the server's structured detail, when it sent an object (the what-if routes do); retryAfter: seconds, from the
+   * Retry-After header. Both are absent for the plain-string errors every other route returns. */
+  constructor(message: string, readonly status: number, readonly info?: Record<string, unknown>, readonly retryAfter?: number) {
     super(message);
   }
+}
+
+/** One place that turns any error body FastAPI sends into a message: a string detail, a validation list, or an object
+ * with a message (and the rest kept as info). */
+function errorOf(body: any, status: number, retryAfter: string | null): ApiError {
+  const d = body?.detail;
+  const seconds = retryAfter !== null && /^\d+$/.test(retryAfter) ? Number(retryAfter) : undefined;
+  if (typeof d === "string") return new ApiError(d, status, undefined, seconds);
+  if (Array.isArray(d)) return new ApiError(d[0]?.msg ?? `HTTP ${status}`, status, undefined, seconds);
+  if (d && typeof d === "object") return new ApiError(typeof d.message === "string" ? d.message : `HTTP ${status}`, status, d, seconds);
+  return new ApiError(`HTTP ${status}`, status, undefined, seconds);
 }
 
 const BASE = "/api/v1";
@@ -42,7 +55,7 @@ export async function api<T = any>(path: string, init?: RequestInit): Promise<T>
   if (!r.ok) {
     const body = await r.json().catch(() => ({}));
     if (r.status === 401 && !path.startsWith("/auth/")) window.dispatchEvent(new Event(SIGNED_OUT));
-    throw new ApiError(typeof body.detail === "string" ? body.detail : Array.isArray(body.detail) ? body.detail[0]?.msg ?? `HTTP ${r.status}` : `HTTP ${r.status}`, r.status);
+    throw errorOf(body, r.status, r.headers.get("Retry-After"));
   }
   return r.json();
 }
