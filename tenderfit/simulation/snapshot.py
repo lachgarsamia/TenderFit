@@ -9,7 +9,7 @@ from datetime import date, datetime
 from tenderfit.assessment.pipeline import LONDON, load_facts, lot_context
 from tenderfit.db import Conn
 from tenderfit.rules.engine import Fact
-from tenderfit.simulation.changes import SimulationError, SimulationNotFound
+from tenderfit.simulation.changes import SimulationConflict, SimulationError, SimulationNotFound
 
 ENGINE_VERSION = "sim-v1"  # bump when what a simulation computes, or how, changes meaning
 DATE_FIELDS = ("notice.deadline", "lot.contract_end")
@@ -67,9 +67,9 @@ def baseline(conn: Conn, profile_id: int, assessment_id: int) -> dict:
     if not a:
         raise SimulationNotFound("assessment not found")
     if a["shadow"]:
-        raise SimulationError("a shadow run is an audit of another assessment, not a baseline")
+        raise SimulationConflict("a shadow run is an audit of another assessment, not a baseline")
     if a["status"] != "done":
-        raise SimulationError(f"only a completed assessment can be a baseline; this one is {a['status']}")
+        raise SimulationConflict(f"only a completed assessment can be a baseline; this one is {a['status']}")
     return a
 
 

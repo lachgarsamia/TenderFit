@@ -167,6 +167,21 @@
     "title": "Body_upload_document_v1_lots__lot_id__documents_post",
     "type": "object"
    },
+   "ChangeIn": {
+    "additionalProperties": false,
+    "properties": {
+     "change": {
+      "additionalProperties": true,
+      "title": "Change",
+      "type": "object"
+     }
+    },
+    "required": [
+     "change"
+    ],
+    "title": "ChangeIn",
+    "type": "object"
+   },
    "ConfirmIn": {
     "properties": {
      "decision": {
@@ -609,6 +624,44 @@
      }
     },
     "title": "SearchIn",
+    "type": "object"
+   },
+   "SimulationIn": {
+    "additionalProperties": false,
+    "properties": {
+     "as_of": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "As Of"
+     },
+     "assessment_id": {
+      "title": "Assessment Id",
+      "type": "integer"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "maxLength": 500,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     }
+    },
+    "required": [
+     "assessment_id"
+    ],
+    "title": "SimulationIn",
     "type": "object"
    },
    "ValidationError": {
@@ -1963,6 +2016,104 @@
     "summary": "Preparation"
    }
   },
+  "/v1/lots/{lot_id}/simulations": {
+   "get": {
+    "operationId": "list_simulations_v1_lots__lot_id__simulations_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "lot_id",
+      "required": true,
+      "schema": {
+       "title": "Lot Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "include_discarded",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Include Discarded",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "maximum": 200,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response List Simulations V1 Lots  Lot Id  Simulations Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "List Simulations",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
   "/v1/opportunities": {
    "get": {
     "operationId": "opportunities_v1_opportunities_get",
@@ -3088,6 +3239,550 @@
      }
     },
     "summary": "Search"
+   }
+  },
+  "/v1/simulations": {
+   "post": {
+    "operationId": "create_simulation_v1_simulations_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SimulationIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Create Simulation V1 Simulations Post",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Create Simulation",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
+  "/v1/simulations/{simulation_id}": {
+   "get": {
+    "operationId": "get_simulation_v1_simulations__simulation_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "simulation_id",
+      "required": true,
+      "schema": {
+       "title": "Simulation Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Get Simulation V1 Simulations  Simulation Id  Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Simulation",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
+  "/v1/simulations/{simulation_id}/changes": {
+   "post": {
+    "operationId": "add_change_v1_simulations__simulation_id__changes_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "simulation_id",
+      "required": true,
+      "schema": {
+       "title": "Simulation Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ChangeIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Add Change V1 Simulations  Simulation Id  Changes Post",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Add Change",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
+  "/v1/simulations/{simulation_id}/discard": {
+   "post": {
+    "operationId": "discard_v1_simulations__simulation_id__discard_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "simulation_id",
+      "required": true,
+      "schema": {
+       "title": "Simulation Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Discard V1 Simulations  Simulation Id  Discard Post",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Discard",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
+  "/v1/simulations/{simulation_id}/preview": {
+   "get": {
+    "operationId": "preview_v1_simulations__simulation_id__preview_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "simulation_id",
+      "required": true,
+      "schema": {
+       "title": "Simulation Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Preview V1 Simulations  Simulation Id  Preview Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Preview",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
+  "/v1/simulations/{simulation_id}/results": {
+   "get": {
+    "operationId": "results_v1_simulations__simulation_id__results_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "simulation_id",
+      "required": true,
+      "schema": {
+       "title": "Simulation Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Results V1 Simulations  Simulation Id  Results Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Results",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
+  "/v1/simulations/{simulation_id}/run": {
+   "post": {
+    "description": "Synchronous and rules-only. Exactly one of two simultaneous runs starts; the other gets 409.",
+    "operationId": "run_v1_simulations__simulation_id__run_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "simulation_id",
+      "required": true,
+      "schema": {
+       "title": "Simulation Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Run V1 Simulations  Simulation Id  Run Post",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Run",
+    "tags": [
+     "simulations"
+    ]
    }
   },
   "/v1/tenders/{opportunity_id}": {

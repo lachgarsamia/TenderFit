@@ -28,6 +28,7 @@ from tenderfit.api.accounts import router as accounts_router  # noqa: E402
 from tenderfit.api.assessments import router  # noqa: E402
 from tenderfit.api.deps import check_csrf, current_profile  # noqa: E402
 from tenderfit.api.screens import router as screens_router  # noqa: E402
+from tenderfit.api.simulations import router as simulations_router  # noqa: E402
 
 
 @app.exception_handler(Exception)
@@ -126,4 +127,5 @@ def opportunities(cpv: list[str] = Query(default=[]), region: list[str] = Query(
 v1.include_router(accounts_router)
 v1.include_router(router)
 v1.include_router(screens_router)
+v1.include_router(simulations_router)
 app.include_router(v1)

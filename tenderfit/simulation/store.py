@@ -8,7 +8,15 @@ from datetime import date
 from psycopg.types.json import Jsonb
 
 from tenderfit.db import Conn, must
-from tenderfit.simulation.changes import HypotheticalChange, SimulationError, SimulationNotFound, dump_change, parse_change
+from tenderfit.simulation import inputs
+from tenderfit.simulation.changes import (
+    HypotheticalChange,
+    SimulationConflict,
+    SimulationError,
+    SimulationNotFound,
+    dump_change,
+    parse_change,
+)
 from tenderfit.simulation.isolation import read_only, require_idle
 from tenderfit.simulation.scenario import Scenario, apply_changes
 from tenderfit.simulation.snapshot import ENGINE_VERSION, Snapshot, take_snapshot
@@ -26,6 +34,8 @@ def create(conn: Conn, profile_id: int, baseline_assessment_id: int, created_by:
         raise SimulationError("say who created the simulation")
     with read_only(conn):
         snap, drift = take_snapshot(conn, profile_id, baseline_assessment_id, as_of)
+        # The live inputs the snapshot does not freeze, as they are now. drift cannot be updated later (019's guard).
+        drift = {**drift, "live_inputs_at_creation": inputs.read(conn, snap)}
     try:
         sid = must(conn.execute(
             """INSERT INTO simulation (profile_id, lot_id, baseline_assessment_id, version_id, title, as_of, snapshot,
@@ -59,7 +69,7 @@ def add_change(conn: Conn, profile_id: int, simulation_id: int, change: object) 
     try:
         row = _row(conn, profile_id, simulation_id, lock=True)  # serialises concurrent additions to one simulation
         if row["status"] != "created":
-            raise SimulationError(f"changes can only be added before a simulation runs; this one is {row['status']}")
+            raise SimulationConflict(f"changes can only be added before a simulation runs; this one is {row['status']}")
         parsed = parse_change(change)
         existing = _changes(conn, simulation_id)
         apply_changes(Snapshot.from_json(row["snapshot"]), existing + [parsed])
@@ -83,8 +93,8 @@ def discard(conn: Conn, profile_id: int, simulation_id: int) -> None:
             (simulation_id, profile_id, list(DISCARDABLE))).fetchone()
         if not done:
             status = _row(conn, profile_id, simulation_id)["status"]
-            raise SimulationError("this simulation is already discarded" if status == "discarded" else
-                                  f"a {status} simulation cannot be discarded until it finishes")
+            raise SimulationConflict("this simulation is already discarded" if status == "discarded" else
+                                     f"a {status} simulation cannot be discarded until it finishes")
         conn.commit()
     except BaseException:
         conn.rollback()
@@ -96,12 +106,15 @@ def get(conn: Conn, profile_id: int, simulation_id: int) -> dict:
     return {**row, "changes": [dump_change(c) for c in _changes(conn, simulation_id)]}
 
 
-def list_for_profile(conn: Conn, profile_id: int, include_discarded: bool = False) -> list[dict]:
+def list_for_profile(conn: Conn, profile_id: int, include_discarded: bool = False, *, lot_id: int | None = None,
+                     limit: int | None = None) -> list[dict]:
+    """Newest first. `lot_id` narrows the list to one lot; it never widens it beyond this supplier."""
     return conn.execute(
         """SELECT s.id, s.lot_id, s.baseline_assessment_id, s.version_id, s.status, s.title, s.as_of, s.created_by, s.created_at,
                   (SELECT count(*) FROM simulation_change c WHERE c.simulation_id = s.id) AS changes
-           FROM simulation s WHERE s.profile_id = %s AND (%s OR s.status <> 'discarded') ORDER BY s.created_at DESC, s.id DESC""",
-        (profile_id, include_discarded)).fetchall()
+           FROM simulation s WHERE s.profile_id = %s AND (%s OR s.status <> 'discarded') AND (%s::bigint IS NULL OR s.lot_id = %s)
+           ORDER BY s.created_at DESC, s.id DESC LIMIT %s""",
+        (profile_id, include_discarded, lot_id, lot_id, limit)).fetchall()
 
 
 def scenario(conn: Conn, profile_id: int, simulation_id: int) -> Scenario:

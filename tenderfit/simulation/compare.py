@@ -19,6 +19,7 @@ class Row:
     simulated: dict | None
     reached: list[dict] = field(default_factory=list)  # impact.Reason records: why a change can affect it
     notes: list[str] = field(default_factory=list)
+    input_drift: list[dict] = field(default_factory=list)  # inputs.compare / since_baseline entries for this requirement
 
     @property
     def control_status(self) -> str | None:
@@ -52,7 +53,9 @@ def _counts(statuses: list[str | None]) -> dict:
 
 
 def summarise(rows: list[Row], baseline_recommendation: str | None, control_recommendation: str,
-              simulated_recommendation: str, config: str) -> dict:
+              simulated_recommendation: str, config: str, *, input_drift: dict | None = None,
+              execution: dict | None = None) -> dict:
+    """input_drift: {"since_creation": [...], "since_baseline": [...]} (inputs.py). execution: what the run read, and from where."""
     needs_model = [r.requirement_id for r in rows if r.how == "needs_model"]
     return {
         "config": config,
@@ -61,6 +64,10 @@ def summarise(rows: list[Row], baseline_recommendation: str | None, control_reco
                      "from": r.control_status, "to": r.simulated_status} for r in rows if r.effect],
         "drift": [{"requirement_id": r.requirement_id, "baseline": r.baseline_status, "control": r.control_status}
                   for r in rows if r.drift],
+        # Live inputs that changed, reported even when no requirement's status moved (an override, for example, changes
+        # only how a not-met verdict is aggregated into the recommendation).
+        "input_drift": input_drift or {"since_creation": [], "since_baseline": []},
+        "execution": execution,
         "needs_model": needs_model,
         "not_affected": [r.requirement_id for r in rows if r.how == "not_affected"],
         "stale_baseline": [r.requirement_id for r in rows if any(n.startswith("baseline may be out of date") for n in r.notes)],
@@ -73,5 +80,7 @@ def summarise(rows: list[Row], baseline_recommendation: str | None, control_reco
             # recommendation compares like with like. That is exact when no change reaches it, so the recommendation is
             # complete unless a change reaches a requirement only the model could re-decide.
             "complete": not needs_model,
+            # The recommendation moved before any hypothesis: drift, never part of the effect.
+            "drift": baseline_recommendation is not None and baseline_recommendation != control_recommendation,
         },
     }
