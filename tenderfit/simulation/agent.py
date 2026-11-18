@@ -6,17 +6,26 @@ final answer's claims about what changed are checked against the stored results 
 has no tool that reaches a live table, and nothing it does is written anywhere but this simulation's own rows: its
 trace and costs go to simulation_agent_step, not agent_step or llm_call.
 
-A single agent with a fixed tool list, not a planner and workers: the task is one short, linear investigation."""
+A single agent with a fixed tool list, not a planner and workers: the task is one short, linear investigation.
+
+A session is bounded three ways before every model call: its deadline (no call starts with under 15 s left, and each
+call's timeout ends before the deadline), its own spend and the supplier's rolling 24-hour spend (spend.admit_call,
+counting the call's worst case). A call is never retried by the SDK, so the deadline holds; a failure ends the session
+as agent_unavailable, recorded as an llm_error step whose cost is the call's worst case when it may have been billed.
+In the background (Phase 2) begin() runs in the API request and investigate() in the worker; ask() is both at once."""
+import inspect
 import json
+import time
 from collections.abc import Callable
 from datetime import date
 
 from psycopg.types.json import Jsonb
 
 from tenderfit.agent.loop import Budget
+from tenderfit.config import settings
 from tenderfit.db import Conn
 from tenderfit.llm import LLM, UNTRUSTED_RULE, LLMError, Usage, untrusted
-from tenderfit.simulation import engine, store
+from tenderfit.simulation import engine, spend, store
 from tenderfit.simulation.changes import KINDS, SimulationError
 from tenderfit.simulation.isolation import read_only, require_idle
 from tenderfit.simulation.snapshot import Snapshot
@@ -84,22 +93,76 @@ without a model reading the text: say so, do not guess. If drift or stale baseli
 question cannot be expressed as these changes, use cannot_simulate. You have at most {MAX_TOOL_CALLS} tool calls."""
 
 
-def ask(conn: Conn, profile_id: int, baseline_assessment_id: int, question: str, llm: LLM, created_by: str,
-        as_of: date | None = None, budget: Budget | None = None) -> dict:
-    """Create a simulation for the question and let the agent build, run and explain it. Returns the outcome."""
+def check_question(question: str) -> str:
     question = question.strip()
     if not question or len(question) > MAX_QUESTION:
         raise SimulationError(f"ask a question of 1 to {MAX_QUESTION} characters")
+    return question
+
+
+def begin(conn: Conn, profile_id: int, baseline_assessment_id: int, question: str, created_by: str,
+          as_of: date | None = None) -> int:
+    """Create the simulation and record the question as its first step. No model call. Returns the simulation id."""
+    question = check_question(question)
     sid = store.create(conn, profile_id, baseline_assessment_id, created_by, question[:500], as_of)
-    session = _Session(conn, profile_id, sid, budget or Budget())
-    session.record("question", {"question": question}, {})
+    try:
+        _Session(conn, profile_id, sid, Budget()).record("question", {"question": question}, {})
+    except BaseException:
+        store.discard(conn, profile_id, sid)  # never a simulation without its question, waiting for an agent
+        raise
+    return sid
+
+
+def ask(conn: Conn, profile_id: int, baseline_assessment_id: int, question: str, llm: LLM, created_by: str,
+        as_of: date | None = None, budget: Budget | None = None) -> dict:
+    """Create a simulation for the question and let the agent build, run and explain it. Returns the outcome."""
+    sid = begin(conn, profile_id, baseline_assessment_id, question, created_by, as_of)
+    return investigate(conn, profile_id, sid, llm, budget)
+
+
+def investigate(conn: Conn, profile_id: int, simulation_id: int, llm: LLM, budget: Budget | None = None, *,
+                clock: Callable[[], float] = time.monotonic) -> dict:
+    """Let the agent build, run and explain the simulation begin() created. A simulation that is no longer waiting for
+    its agent (discarded, run by hand, or already investigated) is left alone: nothing is written and no model called."""
+    sim = store.get(conn, profile_id, simulation_id)
+    steps = conn.execute("SELECT tool, input FROM simulation_agent_step WHERE simulation_id = %s ORDER BY step",
+                         (simulation_id,)).fetchall()
+    conn.rollback()
+    if sim["status"] != "created" or [s["tool"] for s in steps] != ["question"]:
+        reason = f"the simulation is {sim['status']}" if sim["status"] != "created" else (
+            "it has no question" if not steps else "it was already investigated")
+        return {"outcome": "skipped", "simulation_id": simulation_id, "agent_version": AGENT_VERSION, "reason": reason}
+    question = steps[0]["input"]["question"]
+    session = _Session(conn, profile_id, simulation_id, budget or Budget(
+        cost_cap=settings.simulation_agent_session_usd, time_cap=settings.simulation_agent_deadline_s))
+    session.step = len(steps)
+    bounded = _takes_call_options(llm)
+    deadline, started = settings.simulation_agent_deadline_s, clock()
+    model, max_tokens = settings.llm_model_agent, settings.simulation_agent_max_tokens
     messages: list[dict] = [{"role": "user", "content": f"Question: {question}"}]
     for _ in range(MAX_TOOL_CALLS + 2):
         if (why := session.budget.exhausted()) or session.calls >= MAX_TOOL_CALLS:
             return session.end("budget", f"stopped: {why or 'tool-call limit'} reached before an answer")
+        remaining = deadline - (clock() - started)
+        if remaining < spend.MIN_CALL_S:
+            return session.end("budget", "stopped: the session's time limit was reached before an answer")
+        est_input = spend.input_tokens_estimate(SYSTEM, messages, TOOLS)
+        if refused := spend.admit_call(conn, profile_id, simulation_id, spend.worst_case(model, est_input, max_tokens)):
+            return session.end("budget", f"stopped: {refused} before an answer")
+        options = {"timeout": min(remaining - spend.CALL_MARGIN_S, settings.llm_timeout_s), "max_retries": 0,
+                   "max_tokens": max_tokens} if bounded else {}
         try:
-            turn = llm.tool_turn("agent", SYSTEM, messages, TOOLS)
+            turn = llm.tool_turn("agent", SYSTEM, messages, TOOLS, **options)
         except LLMError as e:
+            # A response that came back unusable carries its real usage. A call that failed in flight may still have been
+            # processed and billed: count its worst case (estimated input, max_tokens output), so the account errs high.
+            known: Usage | None = getattr(e, "usage", None)
+            billed = known is None and bool(getattr(e, "may_have_billed", False))
+            spent = known or (Usage(model, input_tokens=est_input, output_tokens=max_tokens) if billed else Usage(model))
+            cost = known.cost_usd if known else spend.worst_case(model, est_input, max_tokens) if billed else 0.0
+            session.budget.spend(cost, spent.input_tokens + spent.output_tokens)
+            session.record("llm_error", {"estimated_input_tokens": est_input}, {"error": str(e)[:500], "cost_estimated": billed},
+                           spent, cost=cost)
             return session.end("agent_unavailable", f"the model could not be reached ({e}); nothing was guessed")
         session.budget.spend(turn.usage.cost_usd, turn.usage.input_tokens + turn.usage.output_tokens)
         messages.append({"role": "assistant", "content": turn.raw_content})
@@ -119,6 +182,17 @@ def ask(conn: Conn, profile_id: int, baseline_assessment_id: int, question: str,
                             **({"is_error": True} if "error" in out else {})})
         messages.append({"role": "user", "content": results})
     return session.end("budget", "stopped: no answer within the step limit")
+
+
+def _takes_call_options(llm: LLM) -> bool:
+    """Whether this model client accepts per-call bounds (the real one, the recorder and the demo do). A client that
+    does not is called exactly as before: test fakes written against the plain protocol keep working."""
+    try:
+        params = inspect.signature(llm.tool_turn).parameters
+    except (TypeError, ValueError):
+        return False
+    return all(k in params for k in ("timeout", "max_retries", "max_tokens")) or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 def answer(conn: Conn, profile_id: int, simulation_id: int) -> dict | None:
@@ -146,8 +220,9 @@ class _Session:
 
     # --- trace ---------------------------------------------------------------------------------------------------------
 
-    def record(self, tool: str, inp: dict, out: dict, usage: Usage | None = None) -> None:
-        """Each step is its own small transaction, so the trace survives a failure later in the session."""
+    def record(self, tool: str, inp: dict, out: dict, usage: Usage | None = None, cost: float | None = None) -> None:
+        """Each step is its own small transaction, so the trace survives a failure later in the session. cost overrides
+        the usage's own (an estimate for a failed call, priced conservatively by spend)."""
         require_idle(self.conn)
         self.step += 1
         try:
@@ -155,7 +230,8 @@ class _Session:
                 """INSERT INTO simulation_agent_step (simulation_id, step, tool, input, output, model, input_tokens, output_tokens,
                                                       cost_usd) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (self.sid, self.step, tool, Jsonb(_jsonable(inp)), Jsonb(_jsonable(out)), usage.model if usage else None,
-                 usage.input_tokens if usage else 0, usage.output_tokens if usage else 0, usage.cost_usd if usage else 0))
+                 usage.input_tokens if usage else 0, usage.output_tokens if usage else 0,
+                 cost if cost is not None else usage.cost_usd if usage else 0))
             self.conn.commit()
         except BaseException:
             self.conn.rollback()

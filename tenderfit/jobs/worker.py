@@ -62,8 +62,25 @@ def run_profile_change(conn: Conn, payload: dict) -> dict:
     return {"assessment_id": aid}
 
 
+def run_simulation_agent(conn: Conn, payload: dict) -> dict:
+    """A what-if question (Mode B), queued by the API with max_attempts=1: it runs once and is never retried, because a
+    rerun would spend again. It writes only the simulation's own rows."""
+    from tenderfit.llm import default_llm
+    from tenderfit.simulation import agent, store
+    try:
+        out = agent.investigate(conn, payload["profile_id"], payload["simulation_id"], default_llm())
+    except Exception:
+        conn.rollback()
+        if store.get(conn, payload["profile_id"], payload["simulation_id"])["status"] == "discarded":
+            conn.rollback()
+            return {"simulation_id": payload["simulation_id"], "outcome": "discarded while it was being investigated"}
+        raise
+    return {"simulation_id": payload["simulation_id"], "outcome": out["outcome"]}
+
+
 HANDLERS = {"import": run_import_job, "assess": run_assess_job, "daily_check": run_daily_check,
-            "detect_changes": run_detect_changes, "shadow_full": run_shadow_full, "profile_change": run_profile_change}
+            "detect_changes": run_detect_changes, "shadow_full": run_shadow_full, "profile_change": run_profile_change,
+            "simulation_agent": run_simulation_agent}
 
 
 def schedule_daily_check(conn: Conn, now: datetime) -> int | None:
@@ -104,10 +121,12 @@ def schedule_changes(conn: Conn, now: datetime) -> int | None:
 
 def run_once(conn: Conn) -> bool:
     from tenderfit.assessment.pipeline import recover_stale_assessments
+    from tenderfit.simulation.engine import recover_stale_simulations
     schedule_import(conn, datetime.now(timezone.utc))
     schedule_daily_check(conn, datetime.now(timezone.utc))
     schedule_changes(conn, datetime.now(timezone.utc))
     recover_stale_assessments(conn)
+    recover_stale_simulations(conn)  # a simulation run whose process died; one still running is never touched
     job = queue.claim(conn)
     if not job:
         return False

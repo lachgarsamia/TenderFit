@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     lot_time_cap_s: float = 180
     agent_enabled: bool = True
     agent_max_tool_calls: int = 8
+    # The what-if agent (Mode B). Read at each check, never captured at import.
+    simulation_agent_daily_usd: float = 5.00     # a supplier's agent spend over any rolling 24 hours
+    simulation_agent_session_usd: float = 0.50   # reserved at admission; one session's cost cap
+    simulation_agent_deadline_s: float = 150     # one session, from the moment the worker starts it
+    simulation_agent_max_tokens: int = 4096      # output per agent call; bounds a call's worst-case cost
+    simulation_agent_queue_max: int = 20         # queued agent jobs across all suppliers
     versionrag_enabled: bool = False
     retrieval_min_score: float | None = None  # no default: a threshold must come from an evaluation on real data
     corrective_max_attempts: int = 1

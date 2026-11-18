@@ -1,4 +1,4 @@
-"""Mode B over HTTP: the deterministic what-if simulations, rules only, no model, synchronous.
+"""Mode B over HTTP: the deterministic what-if simulations (rules only, synchronous) and the what-if agent's questions.
 
 The only API module that imports tenderfit.simulation. It adds no logic of its own: every operation is one call to the
 simulation package, which scopes it to the supplier, owns its transactions and enforces isolation (READ ONLY evaluation,
@@ -14,19 +14,28 @@ simulation to the live assessment.
 
 Before reading or acting on a simulation, its abandoned run (if any) is closed: a run whose process died stays `running`
 otherwise, and could never be discarded. engine.close_abandoned_runs never closes a run that is still alive. It writes
-only the simulation's own status, so even a GET touches nothing live."""
+only the simulation's own status, so even a GET touches nothing live.
+
+A what-if question (POST /assessments/{id}/what-if) is answered in the background: the request creates the simulation,
+records the question and queues one simulation_agent job (max_attempts=1), under the supplier's spend lock. It is refused
+with 409 while the supplier already has a question queued or running, and with 429 when the day's allowance cannot cover
+a whole session or the queue is full. While the agent works on a simulation, nobody else can change or run it (409)."""
 import logging
+import math
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field
 
 from tenderfit.api.assessments import _lot
 from tenderfit.api.deps import Identity, current_profile, current_user
-from tenderfit.db import Conn, connect
-from tenderfit.simulation import engine, store
+from tenderfit.config import settings
+from tenderfit.db import Conn, connect, must
+from tenderfit.jobs import queue
+from tenderfit.simulation import agent, engine, spend, store
 from tenderfit.simulation.changes import SimulationConflict, SimulationError, SimulationNotFound
 from tenderfit.simulation.snapshot import Snapshot
 
@@ -43,6 +52,15 @@ class SimulationIn(BaseModel):
     assessment_id: int
     title: str | None = Field(default=None, max_length=500)
     as_of: date | None = None
+
+
+class WhatIfIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=agent.MAX_QUESTION)
+    as_of: date | None = None
+
+
+AGENT_KIND = "simulation_agent"
 
 
 class ChangeIn(BaseModel):
@@ -92,6 +110,22 @@ def _detail(conn: Conn, row: dict) -> dict:
     }
 
 
+def _agent_jobs(conn: Conn, profile_id: int, simulation_id: int | None = None) -> list[dict]:
+    """The supplier's what-if jobs still queued or running (for one simulation, or any)."""
+    match = {"profile_id": profile_id, **({"simulation_id": simulation_id} if simulation_id is not None else {})}
+    return conn.execute("""SELECT id, status, (payload->>'simulation_id')::bigint AS simulation_id FROM job
+                           WHERE kind = %s AND status IN ('queued', 'running') AND payload @> %s ORDER BY id""",
+                        (AGENT_KIND, Jsonb(match))).fetchall()
+
+
+def _not_while_agent_works(conn: Conn, profile_id: int, simulation_id: int) -> None:
+    busy = _agent_jobs(conn, profile_id, simulation_id)
+    conn.rollback()
+    if busy:
+        raise SimulationConflict(f"the what-if agent is working on this simulation (job {busy[0]['id']}); "
+                                 "wait for it to finish, or discard the simulation")
+
+
 def _recover(conn: Conn, profile_id: int, simulation_id: int | None = None) -> None:
     """Close this supplier's abandoned runs (one simulation's, or all of them) before they are shown or acted on."""
     engine.close_abandoned_runs(conn, profile_id, simulation_id)
@@ -139,6 +173,7 @@ def get_simulation(simulation_id: int, profile_id: int = Depends(current_profile
 @router.post("/simulations/{simulation_id}/changes", status_code=201)
 def add_change(simulation_id: int, body: ChangeIn, profile_id: int = Depends(current_profile)) -> dict:
     with _sim() as conn:
+        _not_while_agent_works(conn, profile_id, simulation_id)
         ordinal = store.add_change(conn, profile_id, simulation_id, body.change)
         changes = store.get(conn, profile_id, simulation_id)["changes"][:ordinal]
     out = {"hypothetical": True, "simulation_id": simulation_id, "ordinal": ordinal, "change": changes[-1]}
@@ -165,6 +200,7 @@ def run(simulation_id: int, profile_id: int = Depends(current_profile)) -> dict:
     """Synchronous and rules-only. Exactly one of two simultaneous runs starts; the other gets 409."""
     with _sim() as conn:
         _recover(conn, profile_id, simulation_id)
+        _not_while_agent_works(conn, profile_id, simulation_id)
         try:
             engine.run(conn, profile_id, simulation_id)
         except (SimulationConflict, SimulationNotFound):
@@ -208,3 +244,69 @@ def discard(simulation_id: int, profile_id: int = Depends(current_profile)) -> d
         store.discard(conn, profile_id, simulation_id)
         return _get(conn, profile_id, simulation_id)
 
+
+
+# --- The what-if agent ------------------------------------------------------------------------------------------------
+
+def _retry_after(at: datetime) -> str:
+    return str(max(1, math.ceil((at - datetime.now(timezone.utc)).total_seconds())))
+
+
+@router.post("/assessments/{assessment_id}/what-if", status_code=202)
+def what_if(assessment_id: int, body: WhatIfIn, profile_id: int = Depends(current_profile),
+            me: Identity = Depends(current_user)) -> dict:
+    """Queue a what-if question for the agent. 202 with the simulation and job to follow (GET /jobs/{job_id},
+    GET /simulations/{id}/trace). The supplier is always the session's."""
+    with _sim() as conn:
+        question = agent.check_question(body.question)
+        with spend.supplier_lock(conn, profile_id):
+            if active := _agent_jobs(conn, profile_id):
+                raise HTTPException(409, {"message": "you already have a what-if question queued or running; "
+                                                     "wait for it to finish", "simulation_id": active[0]["simulation_id"],
+                                          "job_id": active[0]["id"]})
+            if at := spend.frees_at(conn, profile_id, settings.simulation_agent_session_usd):
+                left = spend.allowance(conn, profile_id)
+                raise HTTPException(429, {"message": "today's what-if allowance cannot cover another question yet",
+                                          "remaining_usd": left["remaining_usd"], "next_question_at": at.isoformat()},
+                                    headers={"Retry-After": _retry_after(at)})
+            queued = must(conn.execute("SELECT count(*) AS n FROM job WHERE kind = %s AND status = 'queued'",
+                                       (AGENT_KIND,)).fetchone())["n"]
+            conn.rollback()
+            if queued >= settings.simulation_agent_queue_max:
+                raise HTTPException(429, {"message": "too many what-if questions are waiting; try again shortly"},
+                                    headers={"Retry-After": "30"})
+            sid = agent.begin(conn, profile_id, assessment_id, question, me.email, body.as_of)
+            try:
+                job_id = queue.enqueue(conn, AGENT_KIND, {"profile_id": profile_id, "simulation_id": sid}, max_attempts=1)
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                store.discard(conn, profile_id, sid)  # never a question waiting for an agent that was not queued
+                raise
+    return {"hypothetical": True, "notice": NOTICE, "simulation_id": sid, "job_id": job_id}
+
+
+@router.get("/what-if/allowance")
+def what_if_allowance(profile_id: int = Depends(current_profile)) -> dict:
+    with _sim() as conn:
+        out = spend.allowance(conn, profile_id)
+        busy = _agent_jobs(conn, profile_id)
+    return {**out, "can_ask": out["can_ask"] and not busy,
+            "active": {"simulation_id": busy[0]["simulation_id"], "job_id": busy[0]["id"]} if busy else None}
+
+
+@router.get("/simulations/{simulation_id}/trace")
+def trace(simulation_id: int, profile_id: int = Depends(current_profile)) -> dict:
+    """The agent's steps for this simulation, and its accepted answer once it gave one. Empty for a simulation built by
+    hand. cost_estimated marks a failed call whose cost is an estimate."""
+    with _sim() as conn:
+        steps = agent.trace(conn, profile_id, simulation_id)
+        outcome = agent.answer(conn, profile_id, simulation_id)
+        job = conn.execute("""SELECT id, status FROM job WHERE kind = %s AND payload @> %s ORDER BY id DESC LIMIT 1""",
+                           (AGENT_KIND, Jsonb({"profile_id": profile_id, "simulation_id": simulation_id}))).fetchone()
+    return {"hypothetical": True, "notice": NOTICE, "simulation_id": simulation_id,
+            "job": {"id": job["id"], "status": job["status"]} if job else None, "outcome": outcome,
+            "steps": [{"step": s["step"], "tool": s["tool"], "input": s["input"], "output": s["output"], "model": s["model"],
+                       "tokens": {"input": s["input_tokens"], "output": s["output_tokens"]}, "cost_usd": float(s["cost_usd"]),
+                       "cost_estimated": bool(s["output"].get("cost_estimated", False)), "created_at": s["created_at"]}
+                      for s in steps]}

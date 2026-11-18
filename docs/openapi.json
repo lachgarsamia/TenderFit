@@ -703,6 +703,34 @@
     ],
     "title": "ValidationError",
     "type": "object"
+   },
+   "WhatIfIn": {
+    "additionalProperties": false,
+    "properties": {
+     "as_of": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "As Of"
+     },
+     "question": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Question",
+      "type": "string"
+     }
+    },
+    "required": [
+     "question"
+    ],
+    "title": "WhatIfIn",
+    "type": "object"
    }
   }
  },
@@ -797,6 +825,93 @@
      }
     },
     "summary": "Trace"
+   }
+  },
+  "/v1/assessments/{assessment_id}/what-if": {
+   "post": {
+    "description": "Queue a what-if question for the agent. 202 with the simulation and job to follow (GET /jobs/{job_id},\nGET /simulations/{id}/trace). The supplier is always the session's.",
+    "operationId": "what_if_v1_assessments__assessment_id__what_if_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "assessment_id",
+      "required": true,
+      "schema": {
+       "title": "Assessment Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/WhatIfIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response What If V1 Assessments  Assessment Id  What If Post",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "What If",
+    "tags": [
+     "simulations"
+    ]
    }
   },
   "/v1/auth/active-profile": {
@@ -3785,6 +3900,83 @@
     ]
    }
   },
+  "/v1/simulations/{simulation_id}/trace": {
+   "get": {
+    "description": "The agent's steps for this simulation, and its accepted answer once it gave one. Empty for a simulation built by\nhand. cost_estimated marks a failed call whose cost is an estimate.",
+    "operationId": "trace_v1_simulations__simulation_id__trace_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "simulation_id",
+      "required": true,
+      "schema": {
+       "title": "Simulation Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Trace V1 Simulations  Simulation Id  Trace Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Trace",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
   "/v1/tenders/{opportunity_id}": {
    "get": {
     "operationId": "tender_v1_tenders__opportunity_id__get",
@@ -3852,6 +4044,73 @@
      }
     },
     "summary": "Tender"
+   }
+  },
+  "/v1/what-if/allowance": {
+   "get": {
+    "operationId": "what_if_allowance_v1_what_if_allowance_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response What If Allowance V1 What If Allowance Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "What If Allowance",
+    "tags": [
+     "simulations"
+    ]
    }
   }
  }

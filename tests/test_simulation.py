@@ -128,8 +128,9 @@ def test_simulation_state_lives_only_in_simulation_tables(base):
     db.rollback()
 
 
-# The API module that exposes simulations is the one deliberate exception; anything else that imports them fails.
-SIMULATION_ENTRY_POINTS = {"tenderfit/api/simulations.py"}
+# The API module that exposes simulations and the worker that runs the what-if agent's jobs are the deliberate exceptions;
+# anything else that imports them fails.
+SIMULATION_ENTRY_POINTS = {"tenderfit/api/simulations.py", "tenderfit/jobs/worker.py"}
 
 
 def test_mode_a_code_never_imports_the_simulation_package():

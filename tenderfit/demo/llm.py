@@ -136,5 +136,5 @@ class DemoLLM:
             raise LLMError("provider error 529: overloaded (simulated for the demonstration)")
         return JsonResult(_extract(user) if role == "extract" else _verdict(user), Usage("scripted-demo", 0, 0))
 
-    def tool_turn(self, role: str, system: str, messages: list[dict], tools: list[dict]) -> ToolTurn:
+    def tool_turn(self, role: str, system: str, messages: list[dict], tools: list[dict], **call_options) -> ToolTurn:
         raise LLMError("the scripted demonstration does not run the agent")

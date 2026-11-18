@@ -43,7 +43,8 @@ def routes(sid: int | str, lot: int | str) -> list[tuple[str, str, dict | None]]
     return [("GET", f"/lots/{lot}/simulations", None), ("POST", "/simulations", {"assessment_id": 1}),
             ("GET", f"/simulations/{sid}", None), ("POST", f"/simulations/{sid}/changes", {"change": {"kind": "remove_fact", "fact_id": 1}}),
             ("GET", f"/simulations/{sid}/preview", None), ("POST", f"/simulations/{sid}/run", None),
-            ("GET", f"/simulations/{sid}/results", None), ("POST", f"/simulations/{sid}/discard", None)]
+            ("GET", f"/simulations/{sid}/results", None), ("POST", f"/simulations/{sid}/discard", None),
+            ("GET", f"/simulations/{sid}/trace", None)]
 
 
 # --- Routes -------------------------------------------------------------------------------------------------------------
