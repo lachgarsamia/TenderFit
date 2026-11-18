@@ -36,7 +36,7 @@ export type Summary = {
 };
 
 export type Simulation = {
-  hypothetical: true; notice: string; id: number; lot_id: number; status: SimStatus; title: string | null;
+  hypothetical: true; notice: string; id: number; lot_id: number; status: SimStatus; title: string | null; parent_id: number | null;
   baseline: { assessment_id: number; version_id: number; recommendation: string | null; superseded: boolean | null };
   as_of: string; drift: { facts_changed_since_baseline?: number[]; baseline_on_current_version?: boolean; baseline_superseded?: boolean; [k: string]: unknown };
   changes: Change[]; summary: Summary | null; failure: { stage: string | null; message: string } | null;
@@ -67,7 +67,61 @@ export type Trace = { simulation_id: number; job: { id: number; status: JobStatu
 
 export type ListedSimulation = {
   id: number; lot_id: number; baseline_assessment_id: number; status: SimStatus; title: string | null;
-  as_of: string; created_by: string; created_at: string; changes: number;
+  as_of: string; created_by: string; created_at: string; changes: number; parent_id: number | null; snapshot_sha256: string;
+};
+
+/** What a scenario can change: the frozen, actual values. Nothing hypothetical is in here. */
+export type InputCondition = {
+  ordinal: number; label: string | null; mandatory: boolean; machine_checkable: boolean; kind: string | null; fact: string | null;
+  bound: number | string | null; match: string | null; unit: string | null; accepts: ("set_condition_bound" | "set_condition_match")[];
+};
+export type InputRequirement = {
+  id: number; statement: string; obligation: string; category: string; baseline_status: Status | null;
+  quote: string | null; passage_id: number | null; conditions: InputCondition[];
+};
+export type InputFact = {
+  id: number; attribute: string; label: string; value: Record<string, unknown>; evidence_status: string;
+  valid_until: string | null; editable_keys: string[];
+};
+export type Inputs = {
+  hypothetical: false; assessment_id: number; lot_id: number; as_of: string;
+  requirements: InputRequirement[]; facts: InputFact[]; fields: { "notice.deadline"?: string | null; "lot.quantity"?: number | null };
+  fact_kinds: Record<string, { keys: Record<string, "text" | "number" | "list" | "boolean">; required: string | null }>;
+  evidence_statuses: { existing: string[]; added: string[] };
+  simulation_id?: number; snapshot_sha256?: string; changes?: Change[];
+};
+
+export type Direction = "improved" | "worsened" | "unchanged" | "undetermined";
+export type Cell = {
+  control: Status | null; simulated: Status | null; how: ResultRow["how"]; direction: Direction; effect: boolean;
+  reason_control: string | null; reason_simulated: string | null; reached: ResultRow["reached"]; notes: string[];
+  drift: boolean; input_drift: InputDrift[];
+};
+export type ChangeReach = {
+  ordinal: number; change: Change; target: string; reaches: number[]; moved: number[]; attributable: number[];
+  shared_with_other_changes: number[]; undetermined: number[]; blockers_resolved: number[]; blockers_introduced: number[];
+  uncertainties_resolved: number[]; no_effect: boolean; assumes_evidence: boolean;
+};
+export type Highlights = Record<"blockers_resolved" | "blockers_now_unknown" | "blockers_introduced" | "uncertainties_resolved" |
+  "now_needs_confirmation" | "needs_model", number[]>;
+export type ComparedScenario = {
+  id: number; title: string | null; parent_id: number | null; as_of: string; snapshot_sha256: string; changes: ChangeReach[];
+  recommendation: Summary["recommendation"] | null; counts: Record<Direction, number>; transitions: Record<string, number>;
+  highlights: Highlights; no_effect: boolean; input_drift: Summary["input_drift"]; drift: number[];
+};
+export type PriorityEntry = Pick<ChangeReach, "ordinal" | "change" | "reaches" | "moved" | "attributable" | "blockers_resolved" |
+  "blockers_introduced" | "uncertainties_resolved" | "assumes_evidence"> & { scenario_id: number };
+export type Comparison = {
+  hypothetical: true; notice: string; lot_id: number; baseline_assessment_id: number;
+  integrity: { same_snapshot: boolean; same_live_inputs: boolean; consistent: boolean; notes: string[] };
+  scenarios: ComparedScenario[];
+  requirements: {
+    requirement_id: number; statement: string; obligation: string; category: string; baseline_status: Status | null;
+    quote: string | null; passage_id: number | null; scenarios: Record<string, Cell | null>; affected: boolean; differs_between_scenarios: boolean;
+  }[];
+  facts: Record<string, string>; order: number[]; ordering_rule: string; verdict_order: Status[];
+  priorities: Record<"widest_reach" | "addresses_blockers" | "resolves_uncertainty" | "introduces_blockers" | "little_or_no_effect" |
+    "depends_on_evidence_not_held", PriorityEntry[]> & { basis: string };
 };
 
 export const allowance = () => api<Allowance>("/what-if/allowance");
@@ -77,6 +131,20 @@ export const results = (id: number) => api<{ summary: Summary; results: ResultRo
 export const trace = (id: number) => api<Trace>(`/simulations/${id}/trace`);
 export const listForLot = (lotId: number | string) => api<{ simulations: ListedSimulation[] }>(`/lots/${lotId}/simulations`);
 export const discard = (id: number) => post<Simulation>(`/simulations/${id}/discard`, {});
+export const run = (id: number) => post<Simulation>(`/simulations/${id}/run`, {});
+
+/** A scenario and its whole hypothesis in one request: if any change is invalid, nothing is created. */
+export const create = (assessmentId: number, body: { title?: string; as_of?: string; changes: Change[] }) =>
+  post<Simulation>("/simulations", { assessment_id: assessmentId, ...body });
+/** A new scenario on exactly the parent's frozen snapshot. The parent is not changed. */
+export const createVariation = (parentId: number, body: { title?: string; changes: Change[] }) =>
+  post<Simulation>(`/simulations/${parentId}/variations`, body);
+export const inputsForAssessment = (lotId: number | string, assessmentId: number) =>
+  api<Inputs>(`/lots/${lotId}/simulation-inputs?assessment_id=${assessmentId}`);
+export const inputsForSimulation = (id: number) => api<Inputs>(`/simulations/${id}/inputs`);
+export const compare = (lotId: number | string, ids: number[]) =>
+  api<Comparison>(`/lots/${lotId}/simulations/compare?ids=${ids.join(",")}`);
+export const MAX_COMPARED = 4;
 
 export async function ask(assessmentId: number, question: string, asOf?: string) {
   return post<{ simulation_id: number; job_id: number }>(`/assessments/${assessmentId}/what-if`,

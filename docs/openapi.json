@@ -645,6 +645,22 @@
       "title": "Assessment Id",
       "type": "integer"
      },
+     "changes": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "maxItems": 25,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Changes"
+     },
      "title": {
       "anyOf": [
        {
@@ -702,6 +718,41 @@
      "type"
     ],
     "title": "ValidationError",
+    "type": "object"
+   },
+   "VariationIn": {
+    "additionalProperties": false,
+    "properties": {
+     "changes": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "maxItems": 25,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Changes"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "maxLength": 500,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     }
+    },
+    "title": "VariationIn",
     "type": "object"
    },
    "WhatIfIn": {
@@ -2131,6 +2182,92 @@
     "summary": "Preparation"
    }
   },
+  "/v1/lots/{lot_id}/simulation-inputs": {
+   "get": {
+    "description": "What a new scenario of this assessment could change: the actual requirements, conditions, facts and tender fields\nit would freeze. Creates nothing.",
+    "operationId": "assessment_inputs_v1_lots__lot_id__simulation_inputs_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "lot_id",
+      "required": true,
+      "schema": {
+       "title": "Lot Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "assessment_id",
+      "required": true,
+      "schema": {
+       "title": "Assessment Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Assessment Inputs V1 Lots  Lot Id  Simulation Inputs Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Assessment Inputs",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
   "/v1/lots/{lot_id}/simulations": {
    "get": {
     "operationId": "list_simulations_v1_lots__lot_id__simulations_get",
@@ -2224,6 +2361,95 @@
      }
     },
     "summary": "List Simulations",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
+  "/v1/lots/{lot_id}/simulations/compare": {
+   "get": {
+    "description": "Completed scenarios of one assessment side by side: transitions by name, never a score.",
+    "operationId": "compare_v1_lots__lot_id__simulations_compare_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "lot_id",
+      "required": true,
+      "schema": {
+       "title": "Lot Id",
+       "type": "integer"
+      }
+     },
+     {
+      "description": "2 to 4 simulation ids, comma separated",
+      "in": "query",
+      "name": "ids",
+      "required": true,
+      "schema": {
+       "description": "2 to 4 simulation ids, comma separated",
+       "maxLength": 200,
+       "title": "Ids",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Compare V1 Lots  Lot Id  Simulations Compare Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Compare",
     "tags": [
      "simulations"
     ]
@@ -3671,6 +3897,83 @@
     ]
    }
   },
+  "/v1/simulations/{simulation_id}/inputs": {
+   "get": {
+    "description": "The scenario's frozen inputs (actual values only) and its hypothesis: what a variation starts from.",
+    "operationId": "simulation_inputs_v1_simulations__simulation_id__inputs_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "simulation_id",
+      "required": true,
+      "schema": {
+       "title": "Simulation Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Simulation Inputs V1 Simulations  Simulation Id  Inputs Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Simulation Inputs",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
   "/v1/simulations/{simulation_id}/preview": {
    "get": {
     "operationId": "preview_v1_simulations__simulation_id__preview_get",
@@ -3972,6 +4275,93 @@
      }
     },
     "summary": "Trace",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
+  "/v1/simulations/{simulation_id}/variations": {
+   "post": {
+    "description": "A new scenario on exactly the parent's frozen snapshot, with its own changes. The parent is not touched.",
+    "operationId": "create_variation_v1_simulations__simulation_id__variations_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "simulation_id",
+      "required": true,
+      "schema": {
+       "title": "Simulation Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/VariationIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Create Variation V1 Simulations  Simulation Id  Variations Post",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Create Variation",
     "tags": [
      "simulations"
     ]

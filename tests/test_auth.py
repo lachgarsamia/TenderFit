@@ -31,7 +31,9 @@ PROTECTED = [("get", "/profiles"), ("post", "/profiles"), ("put", "/profile"), (
              ("get", "/documents/1/file"), ("get", "/import-status"), ("get", "/auth/me"), ("post", "/auth/logout"), ("post", "/auth/active-profile"),
              ("get", "/lots/1/simulations"), ("post", "/simulations"), ("get", "/simulations/1"), ("post", "/simulations/1/changes"),
              ("get", "/simulations/1/preview"), ("post", "/simulations/1/run"), ("get", "/simulations/1/results"), ("post", "/simulations/1/discard"),
-             ("post", "/assessments/1/what-if"), ("get", "/what-if/allowance"), ("get", "/simulations/1/trace")]
+             ("post", "/assessments/1/what-if"), ("get", "/what-if/allowance"), ("get", "/simulations/1/trace"),
+             ("post", "/simulations/1/variations"), ("get", "/simulations/1/inputs"), ("get", "/lots/1/simulation-inputs"),
+             ("get", "/lots/1/simulations/compare")]
 
 
 @pytest.mark.parametrize("method,path", PROTECTED)

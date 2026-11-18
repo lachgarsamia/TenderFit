@@ -35,7 +35,7 @@ from tenderfit.api.deps import Identity, current_profile, current_user
 from tenderfit.config import settings
 from tenderfit.db import Conn, connect, must
 from tenderfit.jobs import queue
-from tenderfit.simulation import agent, engine, spend, store
+from tenderfit.simulation import agent, engine, scenarios, spend, store
 from tenderfit.simulation.changes import SimulationConflict, SimulationError, SimulationNotFound
 from tenderfit.simulation.snapshot import Snapshot
 
@@ -52,6 +52,14 @@ class SimulationIn(BaseModel):
     assessment_id: int
     title: str | None = Field(default=None, max_length=500)
     as_of: date | None = None
+    # The hypothesis, validated in full against the snapshot before anything is written (simulation.store.create).
+    changes: list[dict] | None = Field(default=None, max_length=store.MAX_CHANGES)
+
+
+class VariationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str | None = Field(default=None, max_length=500)
+    changes: list[dict] | None = Field(default=None, max_length=store.MAX_CHANGES)
 
 
 class WhatIfIn(BaseModel):
@@ -99,6 +107,7 @@ def _detail(conn: Conn, row: dict) -> dict:
     return {
         "hypothetical": True, "notice": NOTICE,
         "id": row["id"], "lot_id": row["lot_id"], "status": row["status"], "title": row["title"],
+        "parent_id": row["parent_id"],
         "baseline": {"assessment_id": row["baseline_assessment_id"], "version_id": row["version_id"],
                      "recommendation": a.get("recommendation"), "superseded": a.get("superseded")},
         "as_of": row["as_of"], "snapshot_sha256": row["snapshot_sha256"], "engine_version": row["engine_version"],
@@ -159,8 +168,53 @@ def list_simulations(lot_id: int, include_discarded: bool = False, limit: int = 
 def create_simulation(body: SimulationIn, profile_id: int = Depends(current_profile),
                       me: Identity = Depends(current_user)) -> dict:
     with _sim() as conn:
-        sid = store.create(conn, profile_id, body.assessment_id, me.email, title=body.title, as_of=body.as_of)
+        sid = store.create(conn, profile_id, body.assessment_id, me.email, title=body.title, as_of=body.as_of,
+                           changes=body.changes)
         return _get(conn, profile_id, sid)
+
+
+@router.post("/simulations/{simulation_id}/variations", status_code=201)
+def create_variation(simulation_id: int, body: VariationIn, profile_id: int = Depends(current_profile),
+                     me: Identity = Depends(current_user)) -> dict:
+    """A new scenario on exactly the parent's frozen snapshot, with its own changes. The parent is not touched."""
+    with _sim() as conn:
+        _recover(conn, profile_id, simulation_id)
+        sid = store.create_variation(conn, profile_id, simulation_id, me.email, title=body.title, changes=body.changes)
+        return _get(conn, profile_id, sid)
+
+
+@router.get("/simulations/{simulation_id}/inputs")
+def simulation_inputs(simulation_id: int, profile_id: int = Depends(current_profile)) -> dict:
+    """The scenario's frozen inputs (actual values only) and its hypothesis: what a variation starts from."""
+    with _sim() as conn:
+        return {"hypothetical": False, **scenarios.inputs_for_simulation(conn, profile_id, simulation_id)}
+
+
+@router.get("/lots/{lot_id}/simulation-inputs")
+def assessment_inputs(lot_id: int, assessment_id: int, profile_id: int = Depends(current_profile)) -> dict:
+    """What a new scenario of this assessment could change: the actual requirements, conditions, facts and tender fields
+    it would freeze. Creates nothing."""
+    with _sim() as conn:
+        _lot(conn, lot_id)
+        conn.rollback()
+        return {"hypothetical": False, **scenarios.inputs_for_assessment(conn, profile_id, assessment_id, lot_id)}
+
+
+@router.get("/lots/{lot_id}/simulations/compare")
+def compare(lot_id: int, ids: str = Query(..., max_length=200, description="2 to 4 simulation ids, comma separated"),
+            profile_id: int = Depends(current_profile)) -> dict:
+    """Completed scenarios of one assessment side by side: transitions by name, never a score."""
+    try:
+        wanted = [int(x) for x in ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(422, "ids must be simulation ids separated by commas") from None
+    if any(not 0 < x < 2**63 for x in wanted):
+        raise HTTPException(422, "ids must be simulation ids separated by commas")
+    with _sim() as conn:
+        _lot(conn, lot_id)
+        conn.rollback()
+        _recover(conn, profile_id)
+        return {"notice": NOTICE, **scenarios.compare(conn, profile_id, lot_id, wanted)}
 
 
 @router.get("/simulations/{simulation_id}")

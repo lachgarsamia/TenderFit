@@ -622,3 +622,164 @@ queue, LLM and agent tests are unedited. The only edits to existing tests are re
 | per-call bounds never passed | 4 |
 | failed call costs nothing | 1 |
 | manual change allowed while the agent works | 1 |
+
+## 14. Phase 4 as built: building, varying and comparing scenarios
+
+Branch `feature/simulation-scenarios`, stacked on phase 3 (`feature/simulation-frontend`). It extends the simulation
+model; it adds no engine, queue, worker or store. A *scenario* is a simulation. Nothing in this phase calls the model.
+
+**Lifecycle, unchanged.** created → running → completed | failed; any of those → discarded. Changes stay append-only
+while `created`, and a simulation runs once. Editing a scenario therefore happens in two places:
+- before creation, in a client-side draft that nothing on the server sees until **Create**;
+- after creation, by making a **variation**, which is a new simulation. The original is never altered.
+
+**Variations (migration 021).** `simulation.parent_id` points to the scenario a variation was made from. A variation
+copies its parent's frozen snapshot byte for byte, so every scenario explored from one parent is decided on identical
+frozen inputs, however the live profile has moved since. The database proves the lineage:
+- the composite foreign key `(parent_id, profile_id, baseline_assessment_id, snapshot_sha256)` references the same
+  columns of the parent, so a variation can't belong to another supplier, another baseline or another snapshot;
+- `simulation_guard()` (redefined, otherwise identical to 019's) adds `parent_id` to what can never change after
+  creation.
+
+The parent may be in any state except `discarded`. A variation carries only its own changes; the builder pre-fills
+them from the parent's, so "40 days" becomes "20 days" by editing the draft. The live inputs (overrides, answers,
+documents and so on) are read afresh when a variation is created, because input drift is measured from there. Only
+simulation tables change. The migration touches nothing else.
+
+**Endpoints.**
+
+| Route | Behaviour |
+|---|---|
+| `POST /simulations` `{assessment_id, title?, as_of?, changes?}` | `changes` is new: the whole hypothesis, validated in order against the snapshot before anything is written. One invalid change → 422 naming it ("change 2 (remove_fact): …"); nothing is created. |
+| `POST /simulations/{id}/variations` `{title?, changes?}` | 201, the new simulation, with `parent_id`. 404 for another supplier's or a missing parent; 409 for a discarded one; 422 as above. A snapshot or supplier in the body is refused (extra fields forbidden). |
+| `GET /lots/{lot_id}/simulation-inputs?assessment_id=` | What a new scenario of that assessment would freeze: requirements with their conditions (`accepts` names the change kinds each condition takes), the supplier's real facts, the two notice fields, and the fact kinds with their value types. `hypothetical: false`: every value is actual. Creates nothing (READ ONLY). |
+| `GET /simulations/{id}/inputs` | The same view of an existing scenario's frozen snapshot, plus its changes: what a variation starts from. |
+| `GET /lots/{lot_id}/simulations/compare?ids=a,b[,c,d]` | Two to four scenarios, side by side. See below. |
+| `GET /simulations/{id}` and the list | add `parent_id`; the list also gives `snapshot_sha256`. |
+
+`/compare` sits under the lot because `/simulations/compare` would collide with `/simulations/{simulation_id}`.
+
+**Change kinds offered by hand.** Eight of the nine (§12): every kind but `set_requirement_text`. Rules can't read
+wording, so a reworded requirement could only ever come back as "needs reading"; the API still accepts that kind.
+"Change an answer to a requirement" isn't offered: answers are live inputs, not part of the frozen snapshot, so a
+scenario can't vary them without a new change kind. Deferred.
+
+**Actual versus hypothetical.**
+- The builder shows each target's actual, frozen value next to the input for the hypothetical one, marked **Actual**.
+- Every draft change is marked **Hypothetical**.
+- `add_fact` opens with a "Hypothetical evidence" warning: the fact exists only in the scenario, is never added to the
+  profile, and doesn't count as evidence held. An added fact keeps its negative id (§12), so it can't be mistaken
+  for a real one.
+- In the comparison, changes that suppose evidence the supplier doesn't hold are flagged `assumes_evidence` ("Supposes
+  evidence"): an added fact, an evidence status raised to `declared` or `document_on_file`, or a validity later than
+  the frozen one.
+
+**Limits (L3, deferred in §12, now done).** A scenario holds at most **25 changes**, and each change's JSON is at most
+**4,000 characters**. Both apply to creation, variations and `POST …/changes`, in `simulation.store`, so no route can
+skip them. A compare request takes 2 to 4 distinct ids; anything else is 422.
+
+**Comparison semantics.** All scenarios must be the caller's (else 404 "simulation not found", indistinguishable from
+a missing one), on this lot (404), `completed` (409, naming the others) and of one baseline assessment (409).
+- **Effect** is `control → simulated` within each scenario: the same frozen snapshot without and with its changes, in
+  one REPEATABLE READ. The real assessment's verdict is shown beside it, never used to judge an effect, because
+  baseline → control also moves with live data (drift).
+- **Direction** follows `not_met < unknown < needs_confirmation < met`. A row the rules can't decide (`needs_model`)
+  is `undetermined`; an unreached row is `unchanged`. Every transition is also counted by name
+  (`"not_met -> needs_confirmation": 1`), and counts stay per category: improved, worsened, unchanged, undetermined.
+  Nothing is summed into a score.
+- **Highlights**, per scenario, from rule-decided rows only:
+  - `blockers_resolved`: mandatory, not_met → met or needs_confirmation;
+  - `blockers_now_unknown`: mandatory, not_met → unknown. Kept apart because "nothing contradicts it any more" isn't
+    "proved";
+  - `blockers_introduced`;
+  - `uncertainties_resolved`: unknown → decided;
+  - `now_needs_confirmation`;
+  - `needs_model`.
+- **Order.** Scenarios are listed by blockers resolved (most first), then blockers introduced (fewest), uncertainties
+  resolved (most), improved (most), worsened (fewest), id. The response states this rule in words; it's a sort over the
+  counts shown, not a score, and it doesn't predict the buyer's evaluation.
+- **Per requirement:** statement, obligation, the real verdict, the tender quote and `passage_id` (the page opens the
+  source), and for each scenario control, simulated, how, direction, both reasons, the dependency reasons, notes,
+  drift and input drift. Also `affected` (any scenario moves it) and `differs_between_scenarios`.
+
+**Integrity.** `integrity` reports:
+- `same_snapshot`;
+- `same_live_inputs` (every live input's `at_run` digest equal across runs);
+- `consistent`;
+- `notes` naming each problem: scenarios frozen separately, judged as of different days, run by different engine
+  versions, live inputs that changed between runs, or a scenario whose inputs changed between creation and run.
+
+The page shows "Compared on identical inputs" only when all hold, and otherwise "Read this comparison with care" with
+the notes. Comparing separately frozen scenarios is allowed but always flagged; variations avoid it.
+
+**Prioritization (capability D), deterministic.** For every change, `reaches` lists the requirements whose recorded
+dependency reasons (`impact.reach`) name the change's target:
+- `requirement:{id}` for condition and text changes;
+- `fact:{id}` for fact changes, and `fact:-n` for the nth added fact;
+- `field:{name}` for notice fields.
+
+Of those, `moved` lists the ones whose verdict moved, and `attributable` the ones no other change of the same scenario
+reached. When several changes reach one requirement, the move is listed under each of them and attributed to none.
+`priorities` groups the changes:
+- `addresses_blockers`;
+- `resolves_uncertainty`;
+- `widest_reach`;
+- `depends_on_evidence_not_held`;
+- `introduces_blockers`;
+- `little_or_no_effect`.
+
+The response's `basis` says the grouping comes from dependency data and predicts nothing.
+
+**Frontend.**
+- **`/lots/:lotId/scenarios/new?assessment=`, and `?from=` for a variation.** Choose a change kind, then a target from
+  only those it applies to, then a value. Check it on the client (numbers, required keys, lists), then review the draft
+  list, remove items and name the scenario. **Create and run** or **Create without running**. A 422 is shown with the
+  server's message and "Nothing was created".
+- **Simulation page:**
+  - **Run this scenario** appears for a hand-built scenario not yet run; it never appears for one the agent handles;
+  - **Try a variation** appears unless the scenario is discarded or running;
+  - the meta line reads "A variation of scenario N, on the same frozen copy".
+- **What-ifs tab:** **Build a scenario**; a checkbox on each completed scenario of the current assessment (others are
+  disabled, with the reason in the title); **Compare** for 2 to 4. Each row says what it's a variation of.
+- **`/lots/:lotId/compare?ids=`:**
+  - the integrity banner;
+  - one card per scenario, in the stated order: its changes, recommendation without and with, the four counts, the named
+    verdict moves and the highlights;
+  - the requirement table: affected rows first, the rest collapsed, each with a "Tender source" button and a "Why" per
+    cell;
+  - "What the changes did" (the priority groups).
+
+  Every simulated verdict uses the dashed hypothetical pill. On phones the cards stack and the table scrolls inside its
+  container; the page itself never scrolls sideways.
+
+**Where this differs from §3 and §7, and why.**
+- §7 called "Try a variation" a client feature that copies the changes into a new simulation. It's server-side
+  (migration 021), because a fresh snapshot would let the live profile move between scenarios, so they couldn't be
+  compared on identical inputs. The prompt for this phase asked for "an explicit reference to the frozen baseline".
+- The builder offers eight change kinds, not the five options in §7, because every kind but rewording is decidable by
+  the rules.
+- Creation with changes is one request, not a create followed by one request per change. A partly built draft can't
+  be left behind by a failure, and the 422 names the change.
+
+**Known limits.**
+- Answers to requirements can't be varied (see above).
+- Comparing needs completed scenarios; a scenario that failed or was never run can still be varied.
+- `attributable` is conservative: with two changes that both reach a requirement, the move is attributed to neither,
+  even if only one could have caused it. The page says the move is shared.
+- `assumes_evidence` for a validity change compares dates only; a change to an earlier date isn't flagged.
+
+**Tests.** `tests/test_simulation_scenarios.py` (29 tests) covers:
+- atomic creation; invalid, unsupported, protected and malformed hypotheses creating nothing; the size limits;
+- variations sharing the snapshot while the live profile moves; variations of variations; ownership and conflicts;
+- the foreign key and the immutable `parent_id`; migration 021 touching only simulation tables;
+- the inputs views and their ownership;
+- comparison semantics (transitions, highlights, the not_met → unknown case, order, priorities, attribution),
+  integrity for separately frozen scenarios and for live-input changes between runs, every refusal, and live-table
+  immutability.
+
+Registrations only in existing tests: `test_auth.PROTECTED` and `routes()` in `test_simulation_api.py`, both of which
+fail when a route is missing.
+
+Frontend: `web/src/test/scenarios.test.tsx` (11 tests): the builder, client checks, server refusals, hypothetical
+evidence, target filtering, variations, running a draft, list selection, comparison rendering, integrity warnings,
+refusals and the source dialog. The phase 3 tests run unedited.
