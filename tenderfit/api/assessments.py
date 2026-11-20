@@ -119,9 +119,12 @@ def get_assessment(lot_id: int, profile_id: int) -> dict:
                       (SELECT coalesce(jsonb_agg(jsonb_build_object('id', f.id, 'label', f.label,
                               'evidence_status', f.evidence_status, 'valid_until', f.valid_until,
                               'supports', (SELECT coalesce(jsonb_agg(jsonb_build_object('filename', e.filename, 'page', s.page, 'quote', s.quote,
-                                                      'human_verified_by', s.human_verified_by)), '[]')
+                                                      'human_verified_by', s.human_verified_by, 'verified', s.verified,
+                                                      'verification_level', (SELECT fv.level FROM fact_verification fv
+                                                        WHERE fv.fact_id = s.fact_id AND fv.evidence_file_id = s.evidence_file_id
+                                                        ORDER BY fv.id DESC LIMIT 1))), '[]')
                                            FROM fact_support s JOIN evidence_file e ON e.id = s.evidence_file_id
-                                           WHERE s.fact_id = f.id AND s.verified),
+                                           WHERE s.fact_id = f.id AND (s.verified OR s.human_verified_by IS NOT NULL)),
                               'verification_level', (SELECT fv.level FROM fact_verification fv WHERE fv.fact_id = f.id ORDER BY fv.id DESC LIMIT 1))), '[]')
                          FROM verdict_fact vf JOIN profile_fact f ON f.id = vf.fact_id WHERE vf.verdict_id = v.id) AS facts,
                       (SELECT coalesce(jsonb_agg(jsonb_build_object('label', rc.label, 'mandatory', rc.mandatory, 'status', vc.status,

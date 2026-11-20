@@ -80,7 +80,7 @@ def create_variation(conn: Conn, profile_id: int, parent_id: int, created_by: st
         drift = {**{k: v for k, v in parent["drift"].items() if k != "live_inputs_at_creation"},
                  "live_inputs_at_creation": inputs.read(conn, snap)}
     apply_changes(snap, parsed)
-    return _insert(conn, profile_id, snap, parent["snapshot_sha256"], drift, title, created_by, parsed, parent_id=parent_id)
+    return _insert(conn, profile_id, snap, parent["snapshot_sha256"], drift, title, created_by, parsed, parent_id=parent_id, engine_version=parent["engine_version"])
 
 
 def _who(title: str | None, created_by: str) -> tuple[str | None, str]:
@@ -93,7 +93,7 @@ def _who(title: str | None, created_by: str) -> tuple[str | None, str]:
 
 
 def _insert(conn: Conn, profile_id: int, snap: Snapshot, sha: str, drift: dict, title: str | None, created_by: str,
-            changes: list[HypotheticalChange], parent_id: int | None) -> int:
+            changes: list[HypotheticalChange], parent_id: int | None, engine_version: str = ENGINE_VERSION) -> int:
     require_idle(conn)
     try:
         sid = must(conn.execute(
@@ -101,7 +101,7 @@ def _insert(conn: Conn, profile_id: int, snap: Snapshot, sha: str, drift: dict, 
                                        snapshot_sha256, drift, engine_version, created_by, parent_id)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
             (profile_id, snap.lot_id, snap.assessment_id, snap.version_id, title, snap.as_of, Jsonb(snap.to_json()),
-             sha, Jsonb(drift), ENGINE_VERSION, created_by, parent_id)).fetchone())["id"]
+             sha, Jsonb(drift), engine_version, created_by, parent_id)).fetchone())["id"]
         for ordinal, c in enumerate(changes, start=1):
             conn.execute("INSERT INTO simulation_change (simulation_id, ordinal, kind, payload) VALUES (%s, %s, %s, %s)",
                          (sid, ordinal, c.kind, Jsonb(dump_change(c))))

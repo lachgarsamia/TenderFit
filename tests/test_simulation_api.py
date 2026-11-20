@@ -40,11 +40,13 @@ def new(api, client="A", assessment=None, **body) -> dict:
 
 def routes(sid: int | str, lot: int | str) -> list[tuple[str, str, dict | None]]:
     """Every simulation route, as (method, path, body)."""
+    rid = "{requirement_id}" if isinstance(sid, str) and sid.startswith("{") else 1
     return [("GET", f"/lots/{lot}/simulations", None), ("POST", "/simulations", {"assessment_id": 1}),
             ("GET", f"/simulations/{sid}", None), ("POST", f"/simulations/{sid}/changes", {"change": {"kind": "remove_fact", "fact_id": 1}}),
             ("GET", f"/simulations/{sid}/preview", None), ("POST", f"/simulations/{sid}/run", None),
             ("GET", f"/simulations/{sid}/results", None), ("POST", f"/simulations/{sid}/discard", None),
             ("GET", f"/simulations/{sid}/trace", None),
+            ("GET", f"/simulations/{sid}/results/{rid}/provenance", None),
             ("POST", f"/simulations/{sid}/variations", {"title": "v"}), ("GET", f"/simulations/{sid}/inputs", None),
             ("GET", f"/lots/{lot}/simulation-inputs", None), ("GET", f"/lots/{lot}/simulations/compare", None)]
 

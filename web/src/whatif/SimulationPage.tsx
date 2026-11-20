@@ -6,6 +6,7 @@ import { Card, Empty, ErrorNote, Skeleton, Tag, Tile } from "../components/ui";
 import * as sims from "./api";
 import type { Outcome, ResultRow, Simulation, Status, Step, Summary } from "./api";
 import { INPUT, type Phase, describeChange, describeStep, phaseOf, usd } from "./describe";
+import { Provenance } from "./Provenance";
 import { useInvestigation } from "./useInvestigation";
 
 const LABEL: Record<Status, [string, string, string]> = {
@@ -116,7 +117,7 @@ export default function SimulationPage() {
       {sim.status === "completed" && sim.summary && results && <>
         <ImpactSummary s={sim.summary} />
         {trace?.outcome?.outcome === "answered" && <AgentAnswer o={trace.outcome} />}
-        <Comparison rows={results} />
+        <Comparison rows={results} simulationId={id} />
         <DriftAndLimits s={sim.summary} rows={results} />
       </>}
 
@@ -198,21 +199,21 @@ function AgentAnswer({ o }: { o: Outcome }) {
   </Card>;
 }
 
-function Comparison({ rows }: { rows: ResultRow[] }) {
+function Comparison({ rows, simulationId }: { rows: ResultRow[]; simulationId: number }) {
   const changed = rows.filter((r) => r.effect);
   const rest = rows.filter((r) => !r.effect);
   return <Card flush title="Requirement by requirement" note={`${changed.length} changed · ${rest.length} unchanged`}>
     {changed.length === 0 && <Empty>No requirement's verdict changes under this hypothesis.</Empty>}
-    {changed.length > 0 && <ComparisonTable rows={changed} caption="Requirements whose verdict changes" />}
+    {changed.length > 0 && <ComparisonTable simulationId={simulationId} rows={changed} caption="Requirements whose verdict changes" />}
     {rest.length > 0 && <details className="more unchanged" open={changed.length === 0}>
       <summary>Unchanged requirements · {rest.length}</summary>
-      <ComparisonTable rows={rest} caption="Requirements whose verdict does not change" />
+      <ComparisonTable simulationId={simulationId} rows={rest} caption="Requirements whose verdict does not change" />
     </details>}
-    <p className="small muted" style={{ padding: "0 20px 14px" }}>The source quotes and citations behind each verdict are on <strong>your assessment</strong>; the reasons here are the rule engine's own.</p>
+
   </Card>;
 }
 
-function ComparisonTable({ rows, caption }: { rows: ResultRow[]; caption: string }) {
+function ComparisonTable({ rows, caption, simulationId }: { rows: ResultRow[]; caption: string; simulationId: number }) {
   return <div className="table-wrap"><table className="sim-table">
     <caption className="sr-only">{caption}</caption>
     <thead><tr><th>Requirement</th><th>Your assessment</th><th>Without changes</th><th>With changes</th><th>Why</th></tr></thead>
@@ -222,7 +223,7 @@ function ComparisonTable({ rows, caption }: { rows: ResultRow[]; caption: string
       <td><SimVerdict status={r.baseline_status} real /></td>
       <td><SimVerdict status={r.control_status} /></td>
       <td><SimVerdict status={r.simulated_status} /></td>
-      <td className="small"><Why r={r} /></td>
+      <td className="small"><Why r={r} /><Provenance row={r} simulationId={simulationId} /></td>
     </tr>)}</tbody>
   </table></div>;
 }

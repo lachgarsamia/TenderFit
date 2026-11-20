@@ -30,7 +30,7 @@ from tenderfit.documents import service as docs
 from tenderfit.llm import LLM
 from tenderfit.rules import aggregate as agg
 from tenderfit.rules.engine import NEEDS, NOT_MET, Context
-from tenderfit.simulation import inputs, store
+from tenderfit.simulation import inputs, provenance, store
 from tenderfit.simulation.changes import SimulationConflict, SimulationError
 from tenderfit.simulation.compare import Row, summarise
 from tenderfit.simulation.impact import reach
@@ -213,6 +213,11 @@ def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineC
         s = _decide(conn, snap, simulated, row, config) if why or not selective else c
         if not why and s != c:
             raise SimulationError(f"requirement {req['id']} changed although no change reaches it: the dependency analysis is incomplete")
+        # Attach context after equivalence checking: provenance differs even when the decision is identical.
+        if c is not None:
+            c = {**c, "provenance": provenance.record(c, control, simulated, req["id"], control=True)}
+        if s is not None:
+            s = {**s, "provenance": provenance.record(s, simulated, simulated, req["id"])}
         r = Row(req["id"], req["statement"], req["obligation"], req["baseline_verdict_id"], req["baseline_status"], c, s, why)
         if simulated.requirements[req["id"]].get("text_changed"):
             r.notes.append("the wording changed: only the model can read new wording")
@@ -234,7 +239,7 @@ def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineC
     rec_simulated = lot_dimensions(conn, snap.version_id, profile_id, vs_simulated, inv, simulated.facts, _ctx(simulated), config)
     execution = {
         "snapshot_sha256": sim["snapshot_sha256"],  # covers the frozen part only
-        "frozen": list(inputs.FROZEN),
+        "frozen": list(inputs.FROZEN) + (["evidence references and verification at creation"] if snap.support is not None else []),
         "live_inputs": {name: {"tables": list(inputs.TABLES[name]), "at_run": d["sha256"],
                                "at_creation": ((at_creation or {}).get(name) or {}).get("sha256"),
                                "changed": ((at_creation or {}).get(name) or {}).get("sha256") != d["sha256"]}
@@ -268,7 +273,8 @@ def _decide(conn: Conn, snap: Snapshot, s: Scenario, live: dict, config: Pipelin
 def _record_of(d: Decision) -> dict:
     return {"status": d.status, "reason": d.reason, "basis": d.basis, "facts": d.facts, "params": d.params,
             "required": d.required, "observed": d.observed, "question": d.question, "needs_human": d.needs_human,
-            "conditions": d.conditions, "gaps": d.gaps, "conflict": d.conflict}
+            "conditions": d.conditions, "gaps": d.gaps, "conflict": d.conflict,
+            "citations": [{"passage_id": pid, "quote": quote} for pid, quote in d.citations]}
 
 
 def _v(req: dict, rec: dict | None, overridden: bool, label: str) -> agg.V:

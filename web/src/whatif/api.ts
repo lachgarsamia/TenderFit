@@ -43,9 +43,26 @@ export type Simulation = {
   created_by: string; created_at: string; started_at: string | null; finished_at: string | null; discarded_at: string | null;
 };
 
+export type Provenance = {
+  citations: { passage_id: number; quote: string }[];
+  facts: { id: number; label: string; origin: "actual" | "modified" | "hypothetical" | "removed";
+    value: { [key: string]: unknown }; evidence_status: string; valid_until: string | null; declaration_confirmed: boolean;
+    changes: { ordinal: number; kind: string; before: unknown; after: unknown }[];
+    support: { evidence_file_id: number; page: number | null; quote: string | null; verified: boolean; human_verified: boolean; verification_level?: string | null }[] }[];
+  params: { field: string; value: unknown; origin: string; changes: { ordinal: number; before: unknown; after: unknown }[] }[];
+  requirement_assumptions: { ordinal: number; change: Change }[];
+  needs_human: string | null; gaps: unknown[]; support_available: boolean;
+};
+export type ResolvedProvenance = {
+  control: Provenance | null; simulated: Provenance | null;
+  passages: Record<string, { filename: string; section: string | null; text: string } | null>;
+  evidence: Record<string, { filename: string } | null>;
+};
+
 export type ResultRow = {
   requirement_id: number; statement: string; obligation: string;
   baseline_status: Status | null; control_status: Status | null; simulated_status: Status | null;
+  provenance?: Provenance | null; control_provenance?: Provenance | null;
   how: "rule" | "needs_model" | "not_affected"; effect: boolean; drift: boolean;
   reached: { kind: string; target: string; detail: string }[];
   reason_control: string | null; reason_simulated: string | null; notes: string[]; input_drift: InputDrift[];
@@ -187,3 +204,6 @@ export function refusal(e: unknown): Refusal {
 
 const num = (v: unknown) => (typeof v === "number" ? v : undefined);
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+
+export const provenance = (id: number, requirementId: number) =>
+  api<ResolvedProvenance>(`/simulations/${id}/results/${requirementId}/provenance`);
