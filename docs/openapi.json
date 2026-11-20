@@ -4126,6 +4126,92 @@
     ]
    }
   },
+  "/v1/simulations/{simulation_id}/results/{requirement_id}/provenance": {
+   "get": {
+    "description": "Frozen provenance plus currently readable source metadata. Never substitutes today's evidence for the frozen copy.",
+    "operationId": "result_provenance_v1_simulations__simulation_id__results__requirement_id__provenance_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "simulation_id",
+      "required": true,
+      "schema": {
+       "title": "Simulation Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "path",
+      "name": "requirement_id",
+      "required": true,
+      "schema": {
+       "title": "Requirement Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-tenderfit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenderfit"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "tf_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tf Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Result Provenance V1 Simulations  Simulation Id  Results  Requirement Id  Provenance Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Result Provenance",
+    "tags": [
+     "simulations"
+    ]
+   }
+  },
   "/v1/simulations/{simulation_id}/run": {
    "post": {
     "description": "Synchronous and rules-only. Exactly one of two simultaneous runs starts; the other gets 409.",

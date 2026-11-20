@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from tenderfit.api.assessments import _lot
 from tenderfit.api.deps import Identity, current_profile, current_user
+from tenderfit.api.screens import _readable_document
 from tenderfit.config import settings
 from tenderfit.db import Conn, connect, must
 from tenderfit.jobs import queue
@@ -238,6 +239,45 @@ def add_change(simulation_id: int, body: ChangeIn, profile_id: int = Depends(cur
     return out
 
 
+@router.get("/simulations/{simulation_id}/results/{requirement_id}/provenance")
+def result_provenance(simulation_id: int, requirement_id: int, profile_id: int = Depends(current_profile)) -> dict:
+    """Frozen provenance plus currently readable source metadata. Never substitutes today's evidence for the frozen copy."""
+    with _sim() as conn:
+        sim = store.get(conn, profile_id, simulation_id)
+        if sim["status"] != "completed":
+            raise SimulationConflict("provenance exists only for a completed simulation")
+        result = next((r for r in store.results(conn, profile_id, simulation_id) if r["requirement_id"] == requirement_id), None)
+        if result is None:
+            raise SimulationNotFound("result not found")
+        payload = result["simulated"]
+        records = {name: (payload.get(name) or {}).get("provenance") for name in ("control", "simulated")}
+        passages, evidence = {}, {}
+        for rec in records.values():
+            if rec is None:
+                continue
+            for citation in rec["citations"]:
+                pid = citation["passage_id"]
+                p = conn.execute("SELECT id, document_id, page, section, text FROM passage WHERE id = %s", (pid,)).fetchone()
+                if p:
+                    try:
+                        d = _readable_document(conn, p["document_id"], profile_id)
+                    except HTTPException as e:
+                        if e.status_code != 404:
+                            raise
+                        p = None
+                    else:
+                        p = {**p, "filename": d["filename"]}
+                passages[str(pid)] = p  # missing or inaccessible sources are indistinguishable
+            for fact in rec["facts"]:
+                for support in fact["support"]:
+                    eid = support["evidence_file_id"]
+                    evidence[str(eid)] = conn.execute(
+                        "SELECT id, filename, kind, issuer, issued_on, expires_on FROM evidence_file WHERE id = %s AND profile_id = %s",
+                        (eid, profile_id)).fetchone()
+        return {"hypothetical": True, "notice": NOTICE, "simulation_id": simulation_id, "requirement_id": requirement_id,
+                **records, "passages": passages, "evidence": evidence}
+
+
 @router.get("/simulations/{simulation_id}/preview")
 def preview(simulation_id: int, profile_id: int = Depends(current_profile)) -> dict:
     with _sim() as conn:
@@ -287,6 +327,8 @@ def results(simulation_id: int, profile_id: int = Depends(current_profile)) -> d
             "reason_control": (sim.get("control") or {}).get("reason"),
             "reason_simulated": (sim.get("simulated") or {}).get("reason"), "notes": sim.get("notes", []),
             "input_drift": sim.get("input_drift", []),
+            "provenance": (sim.get("simulated") or {}).get("provenance"),
+            "control_provenance": (sim.get("control") or {}).get("provenance"),
         })
     return {"hypothetical": True, "notice": NOTICE, "simulation_id": simulation_id, "summary": row["summary"], "results": out}
 

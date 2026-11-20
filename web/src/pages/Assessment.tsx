@@ -1,3 +1,4 @@
+import { EvidenceBadge, verifiedSupport } from "../components/EvidenceBadge";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { usePageTitle, useProfile } from "../App";
@@ -6,7 +7,7 @@ import { ProgressBanner } from "../components/ProgressBanner";
 import { SourceDialog, type SourceRef } from "../components/SourceDialog";
 import { AskPanel } from "../whatif/AskPanel";
 import { SimulationList } from "../whatif/SimulationList";
-import { Card, DeciderTag, Empty, ErrorNote, EvidencePill, Fictional, Icon, OppStatus, QualityTag, Skeleton, Tabs, Tag, Tile, Toast, VerdictPill, deciderExplain, human } from "../components/ui";
+import { Card, DeciderTag, Empty, ErrorNote, Fictional, Icon, OppStatus, QualityTag, Skeleton, Tabs, Tag, Tile, Toast, VerdictPill, deciderExplain, human } from "../components/ui";
 
 const LEVEL: Record<string, [string, string]> = { strong: ["Strong", "info"], partial: ["Partial", "warn"], low: ["Low", "bad"] };
 const FEAS: Record<string, [string, string]> = { feasible: ["Feasible", "ok"], confirm: ["Confirm workload", "warn"], blocker: ["Blocker", "bad"], unknown: ["Not settled", ""] };
@@ -344,7 +345,7 @@ function Evidence({ r, busy, answer, setAnswer, reason, setReason, onAnswer, onC
 
       <div className="label">What we know about you</div>
       {r.facts.length ? r.facts.map((f: any) => <div className="fact-block" key={f.id}>
-        <div className="fact-line"><span>{f.label}</span><EvidencePill status={f.evidence_status} /></div>
+        <div className="fact-line"><span>{f.label}</span><EvidenceBadge status={f.evidence_status} verified={f.supports?.some(verifiedSupport) ?? false} /></div>
         {f.supports?.map((s: any, i: number) => <div className="small muted" key={i}>▤ {s.filename}{s.page ? ` · p.${s.page}` : ""}{s.human_verified_by ? ` · checked by ${s.human_verified_by}` : ""}</div>)}
         {f.verification_level && <div className="small muted">{CHECKED[f.verification_level]}</div>}
       </div>) : <div className="small muted">Nothing in your profile covers this yet.</div>}

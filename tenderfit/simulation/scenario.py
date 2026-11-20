@@ -26,7 +26,7 @@ from tenderfit.simulation.changes import (
     SimulationError,
     parse_change,
 )
-from tenderfit.simulation.snapshot import Snapshot
+from tenderfit.simulation.snapshot import Snapshot, _fact_json
 
 NUMERIC = ("min_amount", "at_least", "at_most")
 EVIDENCE = ("has_evidence", "valid_through")
@@ -41,6 +41,8 @@ class Scenario:
     changes: list[HypotheticalChange] = field(default_factory=list)
     touched: set[tuple[str, str]] = field(default_factory=set)  # ("fact", id), ("field", path), ("requirement", id)
 
+    fact_changes: dict[int, list[dict]] = field(default_factory=dict)
+
     @property
     def as_of(self) -> date:
         return self.snapshot.as_of
@@ -51,10 +53,16 @@ def apply_changes(snapshot: Snapshot, changes: list) -> Scenario:
                  {r["id"]: copy.deepcopy(r) for r in snapshot.requirements})
     for n, raw in enumerate(changes, start=1):
         change = parse_change(raw)
+        before = {f.id: _fact_json(f) for f in s.facts}
         try:
             _apply(s, change)
         except SimulationError as e:
             raise SimulationError(f"change {n} ({change.kind}): {e}") from None
+        after = {f.id: _fact_json(f) for f in s.facts}
+        for fid in before.keys() | after.keys():
+            if before.get(fid) != after.get(fid):
+                s.fact_changes.setdefault(fid, []).append({"ordinal": n, "kind": change.kind,
+                                                          "before": before.get(fid), "after": after.get(fid)})
         s.changes.append(change)
     return s
 

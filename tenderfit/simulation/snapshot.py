@@ -11,7 +11,7 @@ from tenderfit.db import Conn
 from tenderfit.rules.engine import Fact
 from tenderfit.simulation.changes import SimulationConflict, SimulationError, SimulationNotFound
 
-ENGINE_VERSION = "sim-v1"  # bump when what a simulation computes, or how, changes meaning
+ENGINE_VERSION = "sim-v2"  # bump when what a simulation computes, or how, changes meaning
 DATE_FIELDS = ("notice.deadline", "lot.contract_end")
 FACT_DATES = ("valid_until", "confirm_by", "confirmed_at")
 
@@ -27,17 +27,22 @@ class Snapshot:
     requirements: list[dict]  # id, statement, quote, category, obligation, ..., baseline verdict, conditions
     fields: dict              # Context.fields of the baseline's notice version
 
+    # None preserves the exact sim-v1 JSON and hash; new snapshots freeze an entry for every fact.
+    support: dict[int, list[dict]] | None = None
+
     def to_json(self) -> dict:
         return {"assessment_id": self.assessment_id, "profile_id": self.profile_id, "lot_id": self.lot_id,
                 "version_id": self.version_id, "as_of": self.as_of.isoformat(),
-                "facts": [_fact_json(f) for f in self.facts], "requirements": self.requirements,
+                **({"schema_version": 2} if self.support is not None else {}),
+                "facts": [{**_fact_json(f), **({"support": self.support.get(f.id, [])} if self.support is not None else {})} for f in self.facts], "requirements": self.requirements,
                 "fields": {k: (v.isoformat() if isinstance(v, date) else v) for k, v in self.fields.items()}}
 
     @classmethod
     def from_json(cls, d: dict) -> "Snapshot":
         return cls(d["assessment_id"], d["profile_id"], d["lot_id"], d["version_id"], date.fromisoformat(d["as_of"]),
                    [_fact_from(f) for f in d["facts"]], d["requirements"],
-                   {k: (date.fromisoformat(v) if k in DATE_FIELDS and v else v) for k, v in d["fields"].items()})
+                   {k: (date.fromisoformat(v) if k in DATE_FIELDS and v else v) for k, v in d["fields"].items()},
+                   {f["id"]: f.get("support", []) for f in d["facts"]} if d.get("schema_version") == 2 else None)
 
     def sha256(self) -> str:
         return hashlib.sha256(json.dumps(self.to_json(), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -51,7 +56,7 @@ def _fact_json(f: Fact) -> dict:
 
 
 def _fact_from(d: dict) -> Fact:
-    return Fact(**{**d, **{k: date.fromisoformat(d[k]) if d[k] else None for k in FACT_DATES}})
+    return Fact(**{**{k: v for k, v in d.items() if k != "support"}, **{k: date.fromisoformat(d[k]) if d[k] else None for k in FACT_DATES}})
 
 
 def _conditions(conn: Conn, req: dict) -> list[dict]:
@@ -92,6 +97,17 @@ def take_snapshot(conn: Conn, profile_id: int, assessment_id: int, as_of: date |
                      "conditions": _conditions(conn, r)})
     snap = Snapshot(assessment_id, profile_id, a["lot_id"], a["version_id"], as_of,
                     load_facts(conn, profile_id, a["lot_id"], a["version_id"]), reqs, dict(ctx.fields))
+    snap.support = {f.id: [] for f in snap.facts}
+    for row in conn.execute(
+            """SELECT s.fact_id, s.evidence_file_id, s.page, s.quote, s.verified,
+                      (s.human_verified_by IS NOT NULL) AS human_verified,
+                      (SELECT v.level FROM fact_verification v WHERE v.fact_id = s.fact_id
+                       AND v.evidence_file_id = s.evidence_file_id ORDER BY v.id DESC LIMIT 1) AS verification_level
+               FROM fact_support s JOIN profile_fact f ON f.id = s.fact_id
+               JOIN evidence_file e ON e.id = s.evidence_file_id
+               WHERE f.profile_id = %s AND e.profile_id = %s ORDER BY s.id""", (profile_id, profile_id)):
+        if row["fact_id"] in snap.support:
+            snap.support[row["fact_id"]].append({k: v for k, v in row.items() if k != "fact_id"})
     return snap, drift(conn, a, as_of)
 
 

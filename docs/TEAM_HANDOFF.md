@@ -3,6 +3,7 @@
 **Read this first.** It explains what TenderFit is, what has been built, how it works, how to run it and how to contribute without breaking it.
 
 - State described: `main` at `bfe4015`, 18 November 2026. Every name, limit and route below was checked against that code.
+- Continuation on `codex/remaining-phases`: [Phase 5 provenance](PHASE5_PROVENANCE.md), including `sim-v2` support snapshots, evidence presentation and Phase 9 annotation intake. The original phase descriptions below remain the historical handoff.
 - Companion documents:
   - [ARCHITECTURE_REFERENCE.md](ARCHITECTURE_REFERENCE.md): diagrams, module map, schema, invariants.
   - [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md): Phases 5–9.
