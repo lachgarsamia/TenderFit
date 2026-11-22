@@ -329,6 +329,7 @@ def results(simulation_id: int, profile_id: int = Depends(current_profile)) -> d
             "input_drift": sim.get("input_drift", []),
             "provenance": (sim.get("simulated") or {}).get("provenance"),
             "control_provenance": (sim.get("control") or {}).get("provenance"),
+            "attribution": sim.get("attribution"),
         })
     return {"hypothetical": True, "notice": NOTICE, "simulation_id": simulation_id, "summary": row["summary"], "results": out}
 

@@ -30,7 +30,7 @@ export function Provenance({ row, simulationId }: { row: ResultRow; simulationId
   </details>;
 }
 
-function Evidence({ record, data }: { record: Record; data: ResolvedProvenance | null }) {
+export function Evidence({ record, data }: { record: Record; data: ResolvedProvenance | null }) {
   return <div className="small provenance">
     <Tag>Rule conclusion</Tag>{record.needs_human && <Tag tone="warn">Needs a person</Tag>}
     {record.citations.map((c, i) => <div key={i}>

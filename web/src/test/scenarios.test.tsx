@@ -276,3 +276,19 @@ describe("comparing scenarios", () => {
     expect(calls.some((c) => c.path.includes("compare"))).toBe(false);
   });
 });
+
+
+it("shows checked alternatives in a comparison cell", async () => {
+  const body = structuredClone(COMPARISON);
+  Object.assign(body.requirements[0].scenarios[31], { attribution: { basis: "Checked alternatives only.", changes: [
+    { ordinal: 1, state: "computed", labels: ["necessary", "jointly_required"],
+      alone: { state: "decided", ordinals: [1], status: "not_met", reason: "Other condition still fails" },
+      without: { state: "decided", ordinals: [2], status: "not_met", reason: "Delivery still fails" } },
+  ] } });
+  server({ ...BASE, "GET /lots/1/simulations/compare": { body } });
+  open("/lots/1/compare?ids=31,32");
+  expect(await screen.findByText("Which changes matter?")).toBeTruthy();
+  expect(screen.getByText(/Removing this change gives a different verdict/)).toBeTruthy();
+  expect(screen.getByText(/needs other changes/)).toBeTruthy();
+  expect(screen.getByText("Other condition still fails")).toBeTruthy();
+});

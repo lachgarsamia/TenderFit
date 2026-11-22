@@ -29,14 +29,14 @@ def record(decision: dict, state: Scenario, hypothesis: Scenario, requirement_id
     for field in decision["params"]:
         changes = []
         previous = _value(state.snapshot.fields.get(field))
-        for i, c in enumerate(hypothesis.changes, 1):
+        for i, c in zip(hypothesis.change_ordinals, hypothesis.changes, strict=True):
             if c.kind == "set_notice_field" and c.field == field:
                 after = _value(c.value)
                 changes.append({"ordinal": i, "before": previous, "after": after})
                 previous = after
         params.append({"field": field, "value": _value(state.fields.get(field)),
                        "origin": "modified" if changes and not control else "actual", "changes": changes if not control else []})
-    assumptions = [{"ordinal": i, "change": dump_change(c)} for i, c in enumerate(hypothesis.changes, 1)
+    assumptions = [{"ordinal": i, "change": dump_change(c)} for i, c in zip(hypothesis.change_ordinals, hypothesis.changes, strict=True)
                    if getattr(c, "requirement_id", None) == requirement_id] if not control else []
     return {"citations": decision["citations"], "facts": facts, "params": params,
             "requirement_assumptions": assumptions, "needs_human": decision["needs_human"],

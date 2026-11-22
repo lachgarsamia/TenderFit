@@ -30,7 +30,7 @@ from tenderfit.documents import service as docs
 from tenderfit.llm import LLM
 from tenderfit.rules import aggregate as agg
 from tenderfit.rules.engine import NEEDS, NOT_MET, Context
-from tenderfit.simulation import inputs, provenance, store
+from tenderfit.simulation import attribution, inputs, provenance, store
 from tenderfit.simulation.changes import SimulationConflict, SimulationError
 from tenderfit.simulation.compare import Row, summarise
 from tenderfit.simulation.impact import reach
@@ -234,6 +234,8 @@ def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineC
         label = _source_label(conn, row)
         vs_control.append(_v(req, c, is_overridden, label))
         vs_simulated.append(_v(req, s, is_overridden, label))
+    attributed = attribution.analyze(rows, snap, sim["changes"],
+                                     lambda state, rid: _decide(conn, snap, state, live[rid], config))
     inv = docs.inventory(conn, snap.version_id, profile_id)
     rec_control = lot_dimensions(conn, snap.version_id, profile_id, vs_control, inv, control.facts, _ctx(control), config)
     rec_simulated = lot_dimensions(conn, snap.version_id, profile_id, vs_simulated, inv, simulated.facts, _ctx(simulated), config)
@@ -246,9 +248,11 @@ def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineC
                         for name, d in at_run.items()},
         "transaction": "control and simulated were read in one REPEATABLE READ, READ ONLY transaction",
     }
-    return rows, summarise(rows, baseline["recommendation"], rec_control.recommendation, rec_simulated.recommendation,
+    summary = summarise(rows, baseline["recommendation"], rec_control.recommendation, rec_simulated.recommendation,
                            config.name, input_drift={"since_creation": since_creation, "since_baseline": since_baseline},
                            execution=execution)
+    summary["attribution"] = attributed
+    return rows, summary
 
 
 def _ctx(s: Scenario) -> Context:
@@ -295,7 +299,7 @@ def _record(conn: Conn, simulation_id: int, rows: list[Row], summary: dict) -> N
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
             (simulation_id, r.requirement_id, r.baseline_verdict_id, r.baseline_status, r.control_status, r.simulated_status,
              r.how, Jsonb({"simulated": r.simulated, "control": r.control, "reached": r.reached, "effect": r.effect,
-                           "drift": r.drift, "notes": r.notes, "input_drift": r.input_drift})))
+                           "drift": r.drift, "notes": r.notes, "input_drift": r.input_drift, "attribution": r.attribution})))
     done = conn.execute("""UPDATE simulation SET status = 'completed', finished_at = now(), summary = %s
                            WHERE id = %s AND status = 'running' RETURNING id""", (Jsonb(summary), simulation_id)).fetchone()
     if not done:

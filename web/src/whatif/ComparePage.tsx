@@ -4,6 +4,7 @@ import { usePageTitle } from "../App";
 import { STATIC, fmtDate } from "../api";
 import { SourceDialog, type SourceRef } from "../components/SourceDialog";
 import { Card, Empty, ErrorNote, Skeleton, Tag } from "../components/ui";
+import { Counterfactuals } from "./Counterfactuals";
 import * as sims from "./api";
 import type { Cell, ComparedScenario, Comparison, Direction, PriorityEntry } from "./api";
 import { HypotheticalBanner, SimVerdict } from "./SimulationPage";
@@ -166,6 +167,7 @@ function CellView({ cell }: { cell: Cell | null }) {
       {cell.reached.map((x, i) => <div key={i} className="muted">Reached: {x.detail}</div>)}
       {cell.notes.map((n, i) => <div key={i} className="muted">{n}</div>)}
     </details>}
+    {cell.effect && <Counterfactuals analysis={cell.attribution} />}
     {cell.drift && <div className="warn-text">Differs from your assessment for other reasons too.</div>}
   </div>;
 }
