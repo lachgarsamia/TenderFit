@@ -42,20 +42,28 @@ class Scenario:
     touched: set[tuple[str, str]] = field(default_factory=set)  # ("fact", id), ("field", path), ("requirement", id)
 
     fact_changes: dict[int, list[dict]] = field(default_factory=dict)
+    change_ordinals: list[int] = field(default_factory=list)
 
     @property
     def as_of(self) -> date:
         return self.snapshot.as_of
 
 
-def apply_changes(snapshot: Snapshot, changes: list) -> Scenario:
+def apply_changes(snapshot: Snapshot, changes: list, *, include: set[int] | None = None) -> Scenario:
+    """An optional subset retains original change ordinals and added-fact identities. Missing prerequisites fail validation."""
     s = Scenario(snapshot, [replace(f, value=copy.deepcopy(f.value)) for f in snapshot.facts], dict(snapshot.fields),
                  {r["id"]: copy.deepcopy(r) for r in snapshot.requirements})
+    if include is not None and not include <= set(range(1, len(changes) + 1)):
+        raise SimulationError("unknown change ordinal in subset")
+    added = 0
     for n, raw in enumerate(changes, start=1):
         change = parse_change(raw)
+        added += isinstance(change, AddFact)
+        if include is not None and n not in include:
+            continue
         before = {f.id: _fact_json(f) for f in s.facts}
         try:
-            _apply(s, change)
+            _apply(s, change, added_id=-added)
         except SimulationError as e:
             raise SimulationError(f"change {n} ({change.kind}): {e}") from None
         after = {f.id: _fact_json(f) for f in s.facts}
@@ -64,6 +72,7 @@ def apply_changes(snapshot: Snapshot, changes: list) -> Scenario:
                 s.fact_changes.setdefault(fid, []).append({"ordinal": n, "kind": change.kind,
                                                           "before": before.get(fid), "after": after.get(fid)})
         s.changes.append(change)
+        s.change_ordinals.append(n)
     return s
 
 
@@ -112,7 +121,7 @@ def _clean(attribute: str, label: str, value: dict) -> tuple[str, dict]:
         raise SimulationError(str(e)) from None
 
 
-def _apply(s: Scenario, c: HypotheticalChange) -> None:
+def _apply(s: Scenario, c: HypotheticalChange, *, added_id: int) -> None:
     if isinstance(c, SetConditionBound):
         row = _condition(s, c.requirement_id, c.condition, NUMERIC)
         row["condition"] = {**row["condition"], "bound": c.bound}
@@ -139,7 +148,7 @@ def _apply(s: Scenario, c: HypotheticalChange) -> None:
         _swap(s, f, replace(f, value=value))
     elif isinstance(c, AddFact):
         label, value = _clean(c.attribute, c.label, c.value)
-        new_id = -1 - sum(isinstance(x, AddFact) for x in s.changes)
+        new_id = added_id
         # As profile.service.add_declared_fact does: what the supplier states is confirmed on the day it is stated.
         confirmed = s.as_of if c.evidence_status in ("declared", "document_on_file") else None
         s.facts.append(Fact(new_id, c.attribute, label, value, c.evidence_status, c.valid_until,

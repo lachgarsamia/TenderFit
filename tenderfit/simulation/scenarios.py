@@ -152,7 +152,7 @@ def _cell(r: dict | None) -> dict | None:
             "reason_control": (sim.get("control") or {}).get("reason"),
             "reason_simulated": (sim.get("simulated") or {}).get("reason"),
             "reached": sim.get("reached", []), "notes": sim.get("notes", []), "drift": sim.get("drift", False),
-            "input_drift": sim.get("input_drift", [])}
+            "input_drift": sim.get("input_drift", []), "attribution": sim.get("attribution")}
 
 
 def _scenario(sim: dict, snap: Snapshot, rows: dict[int, dict]) -> dict:
@@ -245,6 +245,9 @@ def reach_by_change(changes: list[dict], rows: dict[int, dict], highlights: dict
             **{k: [rid for rid in moved if rid in hl.get(k, [])] for k in
                ("blockers_resolved", "blockers_introduced", "uncertainties_resolved")},
             "no_effect": not moved, "assumes_evidence": assumes_evidence(change, snap),
+            "counterfactuals": [{"requirement_id": rid, **entry} for rid in moved
+                                for entry in ((rows[rid]["simulated"] or {}).get("attribution") or {}).get("changes", [])
+                                if entry["ordinal"] == n],
         })
     return out
 

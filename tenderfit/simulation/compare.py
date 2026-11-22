@@ -21,6 +21,8 @@ class Row:
     notes: list[str] = field(default_factory=list)
     input_drift: list[dict] = field(default_factory=list)  # inputs.compare / since_baseline entries for this requirement
 
+    attribution: dict | None = None
+
     @property
     def control_status(self) -> str | None:
         return self.control["status"] if self.control else None

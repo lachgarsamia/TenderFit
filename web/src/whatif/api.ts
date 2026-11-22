@@ -24,6 +24,7 @@ export type Change = { kind: string; [field: string]: unknown };
 export type InputDrift = { input: string; requirement_id: number | null; detail: string };
 
 export type Summary = {
+  attribution?: { basis: string; decision_limit: number; decisions: number; limited: boolean };
   requirements: number;
   changed: { requirement_id: number; statement: string; obligation: string; from: Status; to: Status }[];
   needs_model: number[];
@@ -59,9 +60,21 @@ export type ResolvedProvenance = {
   evidence: Record<string, { filename: string } | null>;
 };
 
+export type AttributionProbe = {
+  state: "decided" | "needs_model" | "invalid_subset"; ordinals: number[]; status?: Status;
+  reason?: string; detail?: string; provenance?: Provenance;
+};
+export type AttributionEntry = {
+  ordinal: number; state: "computed" | "undetermined" | "limit" | "single_reaching_change";
+  labels: ("sufficient_alone" | "necessary" | "jointly_required" | "redundant" | "no_independent_effect")[];
+  detail?: string; alone?: AttributionProbe; without?: AttributionProbe;
+};
+export type Attribution = { basis: string; changes: AttributionEntry[] };
+
 export type ResultRow = {
   requirement_id: number; statement: string; obligation: string;
   baseline_status: Status | null; control_status: Status | null; simulated_status: Status | null;
+  attribution?: Attribution | null;
   provenance?: Provenance | null; control_provenance?: Provenance | null;
   how: "rule" | "needs_model" | "not_affected"; effect: boolean; drift: boolean;
   reached: { kind: string; target: string; detail: string }[];
@@ -110,11 +123,13 @@ export type Inputs = {
 
 export type Direction = "improved" | "worsened" | "unchanged" | "undetermined";
 export type Cell = {
+  attribution?: Attribution | null;
   control: Status | null; simulated: Status | null; how: ResultRow["how"]; direction: Direction; effect: boolean;
   reason_control: string | null; reason_simulated: string | null; reached: ResultRow["reached"]; notes: string[];
   drift: boolean; input_drift: InputDrift[];
 };
 export type ChangeReach = {
+  counterfactuals?: (AttributionEntry & { requirement_id: number })[];
   ordinal: number; change: Change; target: string; reaches: number[]; moved: number[]; attributable: number[];
   shared_with_other_changes: number[]; undetermined: number[]; blockers_resolved: number[]; blockers_introduced: number[];
   uncertainties_resolved: number[]; no_effect: boolean; assumes_evidence: boolean;

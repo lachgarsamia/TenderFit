@@ -6,6 +6,7 @@ import { Card, Empty, ErrorNote, Skeleton, Tag, Tile } from "../components/ui";
 import * as sims from "./api";
 import type { Outcome, ResultRow, Simulation, Status, Step, Summary } from "./api";
 import { INPUT, type Phase, describeChange, describeStep, phaseOf, usd } from "./describe";
+import { Counterfactuals } from "./Counterfactuals";
 import { Provenance } from "./Provenance";
 import { useInvestigation } from "./useInvestigation";
 
@@ -223,7 +224,7 @@ function ComparisonTable({ rows, caption, simulationId }: { rows: ResultRow[]; c
       <td><SimVerdict status={r.baseline_status} real /></td>
       <td><SimVerdict status={r.control_status} /></td>
       <td><SimVerdict status={r.simulated_status} /></td>
-      <td className="small"><Why r={r} /><Provenance row={r} simulationId={simulationId} /></td>
+      <td className="small"><Why r={r} /><Provenance row={r} simulationId={simulationId} />{r.effect && <Counterfactuals analysis={r.attribution} />}</td>
     </tr>)}</tbody>
   </table></div>;
 }

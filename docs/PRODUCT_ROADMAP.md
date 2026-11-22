@@ -3,7 +3,7 @@
 This roadmap builds on `main` at `bfe4015` (18 November 2026).
 
 - Background: [TEAM_HANDOFF.md](TEAM_HANDOFF.md) covers the product and what exists; [ARCHITECTURE_REFERENCE.md](ARCHITECTURE_REFERENCE.md) covers the technical detail.
-- **Progress since this roadmap was written:** Phase 5A and the assessment/simulation-result portion of 5D are implemented on `codex/remaining-phases`; see [PHASE5_PROVENANCE.md](PHASE5_PROVENANCE.md). Phase 9 annotation intake is prepared under `eval/validation/`, with human labels still pending. The remaining designs below are proposals.
+- **Progress since this roadmap was written:** Phase 5A and the assessment/simulation-result portion of 5D are implemented on `codex/remaining-phases`; see [PHASE5_PROVENANCE.md](PHASE5_PROVENANCE.md). Phase 9 annotation intake is prepared under `eval/validation/`, with human labels still pending. Phase 5C is implemented on the stacked `codex/scenario-attribution` branch; see [PHASE5_ATTRIBUTION.md](PHASE5_ATTRIBUTION.md). The remaining designs below are proposals.
 
 Contents
 
