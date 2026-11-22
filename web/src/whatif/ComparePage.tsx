@@ -131,6 +131,7 @@ function ScenarioCard({ s, statement, fact, parent, lotId }: { s: ComparedScenar
         const [from, to] = t.split(" -> ") as [never, never];
         return <li key={t}><span className="verdict-move"><SimVerdict status={from} /> → <SimVerdict status={to} /></span><span>× {n}</span></li>;
       })}</ul></div>}
+    {(s.override_changes ?? []).map((c) => <p key={c.requirement_id} className="small warn-text">Hypothetical override {c.after ? "on" : "off"} for {statement(c.requirement_id)}. Recommendation only; verdict unchanged.</p>)}
     {s.no_effect && <p className="small muted">These changes move no verdict.</p>}
     {HIGHLIGHT.filter(([k]) => s.highlights[k].length).map(([k, label, tone]) => <div key={k} className="small">
       <Tag tone={tone}>{label}</Tag> {s.highlights[k].map((rid) => statement(rid) ?? `requirement ${rid}`).join("; ")}</div>)}

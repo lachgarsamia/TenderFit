@@ -6,7 +6,7 @@ for its kind). An LLM may later propose changes, but only as these objects, and 
 from datetime import date
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, TypeAdapter, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, TypeAdapter, ValidationError, model_validator
 
 EVIDENCE_STATUSES = ("document_on_file", "declared", "missing", "unknown", "needs_update")  # profile_fact CHECK constraint
 NOTICE_FIELDS = ("notice.deadline", "lot.quantity")
@@ -120,14 +120,32 @@ class SetRequirementText(_Change):
         return self
 
 
+class SetRequirementAnswer(_Change):
+    kind: Literal["set_requirement_answer"] = "set_requirement_answer"
+    requirement_id: Id
+    answer: Annotated[str, Field(strict=True, min_length=1, max_length=2000)] | None
+
+    @model_validator(mode="after")
+    def _not_blank(self):
+        if self.answer is not None and not self.answer.strip():
+            raise ValueError("give an answer, or null to remove it")
+        return self
+
+
+class SetOverride(_Change):
+    kind: Literal["set_override"] = "set_override"
+    requirement_id: Id
+    on: StrictBool
+
+
 HypotheticalChange = Annotated[
     SetConditionBound | SetConditionMatch | SetFactValidity | SetFactEvidence | RemoveFact | SetFactValue | AddFact
-    | SetNoticeField | SetRequirementText,
+    | SetNoticeField | SetRequirementText | SetRequirementAnswer | SetOverride,
     Field(discriminator="kind"),
 ]
 _ADAPTER: TypeAdapter[HypotheticalChange] = TypeAdapter(HypotheticalChange)
 KINDS = tuple(t.model_fields["kind"].default for t in (SetConditionBound, SetConditionMatch, SetFactValidity, SetFactEvidence,
-                                                       RemoveFact, SetFactValue, AddFact, SetNoticeField, SetRequirementText))
+                                                       RemoveFact, SetFactValue, AddFact, SetNoticeField, SetRequirementText, SetRequirementAnswer, SetOverride))
 
 
 def parse_change(data: object) -> HypotheticalChange:

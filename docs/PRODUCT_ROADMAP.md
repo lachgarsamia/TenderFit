@@ -3,7 +3,7 @@
 This roadmap builds on `main` at `bfe4015` (18 November 2026).
 
 - Background: [TEAM_HANDOFF.md](TEAM_HANDOFF.md) covers the product and what exists; [ARCHITECTURE_REFERENCE.md](ARCHITECTURE_REFERENCE.md) covers the technical detail.
-- **Progress since this roadmap was written:** Phase 5A and the assessment/simulation-result portion of 5D are implemented on `codex/remaining-phases`; see [PHASE5_PROVENANCE.md](PHASE5_PROVENANCE.md). Phase 9 annotation intake is prepared under `eval/validation/`, with human labels still pending. Phase 5C is implemented on the stacked `codex/scenario-attribution` branch; see [PHASE5_ATTRIBUTION.md](PHASE5_ATTRIBUTION.md). The remaining designs below are proposals.
+- **Progress since this roadmap was written:** Phase 5A and the assessment/simulation-result portion of 5D are implemented on `codex/remaining-phases`; see [PHASE5_PROVENANCE.md](PHASE5_PROVENANCE.md). Phase 9 annotation intake is prepared under `eval/validation/`, with human labels still pending. Phase 5C is implemented on the stacked `codex/scenario-attribution` branch; see [PHASE5_ATTRIBUTION.md](PHASE5_ATTRIBUTION.md). Phase 5B is implemented on `codex/scenario-answers`; see [PHASE5_ANSWERS.md](PHASE5_ANSWERS.md). The remaining designs below are proposals.
 
 Contents
 
@@ -99,7 +99,7 @@ flowchart LR
   end
   subgraph Next
     P5C[5C Attribution]
-    P5B[5B Answer variation<br/>sim-v2 snapshot]
+    P5B[5B Answer variation<br/>sim-v3 snapshot]
     P6A[6A Gap analysis]
     P6B[6B Fragility]
     U1[8 Design system + assessment UX]
@@ -229,7 +229,7 @@ Overrides follow the same pattern: freeze `overridden` and add `set_override {re
 **Guardrails**
 
 - In Mode A, an answer only turns `unknown` into `needs_confirmation` "as a declaration". That stays true here: a hypothetical answer can never produce `met`.
-- Live `answers` remain a tracked input for `sim-v1` only.
+- Live answers and overrides remain tracked inputs for `sim-v1` and `sim-v2`; `sim-v3` freezes both.
 
 **Tests**
 
@@ -675,7 +675,7 @@ The interface should also:
 | C. UX audit, IA, wireframes (8.A, 8.G) | ✓ | Access to users or proxies |
 | D. Ops basics: backups, structured logs, metrics (9) | ✓ | Hosting decision |
 | E. Documentation fixes ([TEAM_HANDOFF.md §13](TEAM_HANDOFF.md#13-where-older-documents-disagree-with-the-code)) | ✓ | — |
-| F. Answer variation (5B) | After 5A lands | `sim-v2` snapshot |
+| F. Answer variation (5B) | Implemented after 5A and 5C | `sim-v3` snapshot |
 | G. Gap and fragility analysis (6A, 6B) | After 5A | — |
 | H. Frontend build (8.B–F) | After the audit | Design system |
 | I. Agent (7) | **No** | Gates in §6 |

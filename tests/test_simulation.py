@@ -70,6 +70,8 @@ def valid_changes(b) -> list[dict]:
         {"kind": "set_notice_field", "field": "notice.deadline", "value": "2026-12-15"},
         {"kind": "set_requirement_text", "requirement_id": b["install"], "statement": "Installation and removal of old desks included"},
         {"kind": "remove_fact", "fact_id": f["service"]},
+        {"kind": "set_requirement_answer", "requirement_id": b["standard"], "answer": None},
+        {"kind": "set_override", "requirement_id": b["lead"], "on": False},
     ]
 
 
@@ -250,8 +252,8 @@ def test_the_database_refuses_change_kinds_it_does_not_know(base):
 
 
 def test_code_and_schema_agree_on_the_kinds_of_change():
-    sql = (MIGRATIONS / "019_simulations.sql").read_text()
-    listed = re.search(r"kind text NOT NULL CHECK \(kind IN \((.*?)\)\)", sql, re.S)
+    sql = (MIGRATIONS / "022_simulation_answers.sql").read_text()
+    listed = re.search(r"CHECK \(kind IN \((.*?)\)\)", sql, re.S)
     assert listed and set(re.findall(r"'(\w+)'", listed.group(1))) == set(KINDS)
 
 

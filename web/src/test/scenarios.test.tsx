@@ -292,3 +292,35 @@ it("shows checked alternatives in a comparison cell", async () => {
   expect(screen.getByText(/needs other changes/)).toBeTruthy();
   expect(screen.getByText("Other condition still fails")).toBeTruthy();
 });
+
+it.each(["replace", "remove", "override"])("builds a hypothetical %s without updating live answers", async (action) => {
+  const inputs = { ...INPUTS, decision_inputs_frozen: true, requirements: INPUTS.requirements.map((r) => ({ ...r, answers: ["Original declaration"], overridden: false })) };
+  const calls = server({ ...BASE, "GET /lots/1/simulation-inputs": { body: inputs }, "POST /simulations": { status: 201, body: SIM(22) },
+    "GET /simulations/22": { body: SIM(22) }, "GET /simulations/22/trace": NO_TRACE });
+  open("/lots/1/scenarios/new?assessment=11");
+  await userEvent.selectOptions(await screen.findByLabelText("Kind of change"), action === "override" ? "set_override" : "set_requirement_answer");
+  await userEvent.selectOptions(screen.getByLabelText("Requirement"), "1");
+  expect(screen.getByText("Actual, frozen")).toBeTruthy();
+  if (action === "override") {
+    expect(screen.getByText(/recommendation only/)).toBeTruthy();
+    await userEvent.selectOptions(screen.getByLabelText("Hypothetical override"), "on");
+  } else {
+    expect(screen.getByText(/declaration, not evidence/)).toBeTruthy();
+    if (action === "remove") await userEvent.selectOptions(screen.getByLabelText("Hypothetical answer action"), "remove");
+    else await userEvent.type(screen.getByLabelText("Suppose you answered"), "Tested in 2026");
+  }
+  await userEvent.click(screen.getByRole("button", { name: "Add to the scenario" }));
+  expect(mutations(calls)).toEqual([]);
+  await userEvent.click(screen.getByRole("button", { name: "Create without running" }));
+  await waitFor(() => expect(mutations(calls)).toHaveLength(1));
+  expect(mutations(calls)[0].body.changes).toEqual([action === "override" ? { kind: "set_override", requirement_id: 1, on: true } :
+    { kind: "set_requirement_answer", requirement_id: 1, answer: action === "remove" ? null : "Tested in 2026" }]);
+});
+
+it("hides answer and override changes on legacy snapshots", async () => {
+  server(BASE);
+  open("/lots/1/scenarios/new?assessment=11");
+  const select = await screen.findByLabelText("Kind of change");
+  expect(within(select).queryByText(/answered a requirement/)).toBeNull();
+  expect(within(select).queryByText(/blocker override/)).toBeNull();
+});

@@ -48,6 +48,9 @@ set_fact_value {fact_id, key, value}: one value inside a profile fact, e.g. key 
 add_fact {attribute, label, value (object), evidence_status, valid_until}: a fact the supplier does not hold yet,
 referred to afterwards by the negative id add_change returns;
 set_notice_field {field (notice.deadline or lot.quantity), value};
+set_requirement_answer {requirement_id, answer}: a hypothetical declaration, or null to remove all answers; never proof.
+set_override {requirement_id, on}: a hypothetical G6 override, changing aggregation only, never the requirement verdict.
+Both require a snapshot with decision_inputs_frozen=true; old snapshots must keep their live semantics.
 set_requirement_text {requirement_id, statement, quote}: new wording, which only the model could re-assess."""
 
 TOOLS = [
@@ -277,11 +280,13 @@ class _Session:
             rec = self.conn.execute("SELECT recommendation FROM assessment WHERE id = %s", (snap.assessment_id,)).fetchone()
         reqs = [{"requirement_id": r["id"], "obligation": r["obligation"], "category": r["category"],
                  "baseline_status": r["baseline_status"],
+                 "answers": [untrusted("supplier_answer", a) for a in (snap.answers or {}).get(r["id"], [])],
+                 "overridden": (snap.overridden or {}).get(r["id"], False),
                  "text": untrusted("tender_passage", f"{r['statement']}\n{r['quote']}", id=r["passage_id"]),
                  "conditions": [{"ordinal": c["ordinal"], **({k: c["condition"].get(k) for k in ("kind", "fact", "bound", "match")}
                                                             if c["condition"] else {"kind": None, "note": "read by the model only"})}
                                 for c in r["conditions"]]} for r in snap.requirements]
-        return {"as_of": snap.as_of, "deadline": snap.fields.get("notice.deadline"), "quantity": snap.fields.get("lot.quantity"),
+        return {"decision_inputs_frozen": snap.answers is not None, "as_of": snap.as_of, "deadline": snap.fields.get("notice.deadline"), "quantity": snap.fields.get("lot.quantity"),
                 "recommendation": rec["recommendation"] if rec else None, "requirements": reqs, "drift": sim["drift"]}
 
     def read_facts(self, attribute: str | None = None) -> dict:

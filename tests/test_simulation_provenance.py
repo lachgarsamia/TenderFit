@@ -112,7 +112,7 @@ def test_legacy_runs_and_variations_keep_the_original_snapshot(base):
     db = base["db"]
     snap, drift = take_snapshot(db, base["atlas"], base["a"])
     db.rollback()
-    snap.support = None
+    snap.support = snap.answers = snap.overridden = snap.decision_drift = None
     sid = store._insert(db, base["atlas"], snap, snap.sha256(), drift, "legacy", "tester", [], None, engine_version="sim-v1")
     engine.run(db, base["atlas"], sid)
     rows = by_requirement(base, sid)

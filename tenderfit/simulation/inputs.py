@@ -1,7 +1,8 @@
 """What a run reads live, outside the snapshot, and how to tell whether it changed. Reads only.
 
 The snapshot freezes the supplier's facts, the requirements' wording and conditions, the tender fields and the date. Its
-hash covers exactly that, and nothing more. A run also reads these inputs from live tables, so they can change between
+hash also covers evidence support from sim-v2 and answers/overrides from sim-v3. Legacy snapshots still read
+answers and overrides live. The remaining inputs below are live for every version, so they can change between
 the moment a simulation is created and the moment it runs:
 
   overrides         confirmation        the supplier's recorded overrides of a not-met verdict (point G6)
@@ -58,19 +59,21 @@ def read(conn: Conn, snap: Snapshot) -> dict:
     live = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM requirement WHERE id = ANY(%s) ORDER BY id", (rids,))}
     lineage = {rid: _lineage(conn, live[rid]) if rid in live else [rid] for rid in rids}
     every = sorted({i for ids in lineage.values() for i in ids})
-    overrides = conn.execute(
-        """SELECT id, (payload->>'requirement_id')::bigint AS requirement_id, reason FROM confirmation
-           WHERE point = 'G6' AND decision = 'override' AND profile_id = %s AND (payload->>'requirement_id')::bigint = ANY(%s)
-           ORDER BY id""", (snap.profile_id, every)).fetchall()
-    answers = conn.execute(
-        """SELECT id, requirement_id, answer, answered_at FROM question
-           WHERE requirement_id = ANY(%s) AND answer IS NOT NULL AND profile_id IS NOT DISTINCT FROM %s ORDER BY id""",
-        (every, snap.profile_id)).fetchall()
-    per_req: dict[str, dict[int, object]] = {
-        "overrides": {rid: [o for o in overrides if o["requirement_id"] in lineage[rid]] for rid in rids},
-        "answers": {rid: [a for a in answers if a["requirement_id"] in lineage[rid]] for rid in rids},
-        "requirements": {rid: live.get(rid) for rid in rids},
-    }
+    per_req: dict[str, dict[int, object]] = {}
+    if snap.answers is None:
+        overrides = conn.execute(
+            """SELECT id, (payload->>'requirement_id')::bigint AS requirement_id, reason FROM confirmation
+               WHERE point = 'G6' AND decision = 'override' AND profile_id = %s AND (payload->>'requirement_id')::bigint = ANY(%s)
+               ORDER BY id""", (snap.profile_id, every)).fetchall()
+        answers = conn.execute(
+            """SELECT id, requirement_id, answer, answered_at FROM question
+               WHERE requirement_id = ANY(%s) AND answer IS NOT NULL AND profile_id IS NOT DISTINCT FROM %s ORDER BY id""",
+            (every, snap.profile_id)).fetchall()
+        per_req = {
+            "overrides": {rid: [o for o in overrides if o["requirement_id"] in lineage[rid]] for rid in rids},
+            "answers": {rid: [a for a in answers if a["requirement_id"] in lineage[rid]] for rid in rids},
+        }
+    per_req["requirements"] = {rid: live.get(rid) for rid in rids}
     out: dict[str, dict] = {}
     for name, values in per_req.items():
         digests = {str(rid): _sha(v) for rid, v in values.items()}
@@ -113,6 +116,8 @@ def compare(at_creation: dict | None, at_run: dict) -> list[dict]:
 def since_baseline(conn: Conn, snap: Snapshot, baseline_finished) -> list[dict]:
     """Overrides and answers recorded after the baseline ran: they move control away from the baseline, often without any
     requirement's status changing, because an override only changes how a not-met verdict is aggregated."""
+    if snap.answers is not None:
+        return list(snap.decision_drift or [])
     rids = [r["id"] for r in snap.requirements]
     live = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM requirement WHERE id = ANY(%s)", (rids,))}
     out = []

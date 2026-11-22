@@ -43,6 +43,11 @@ export function Evidence({ record, data }: { record: Record; data: ResolvedProve
       <strong>Assumption (this scenario), change {a.ordinal}:</strong> {describeChange(a.change)}
       <p>The tender quote above is the original source. This change is hypothetical.</p>
     </div>)}
+    {record.decision_inputs && <div>
+      <div className="label">{record.decision_inputs.origin === "modified" ? "Hypothetical answers and override" : "Answers and override frozen at creation"}</div>
+      {record.decision_inputs.answers.length ? record.decision_inputs.answers.map((answer, i) => <p key={i}>Declaration, not proof: {answer}</p>) : <p>No answer recorded in this scenario.</p>}
+      <p>Override {record.decision_inputs.overridden ? "on" : "off"}: affects the recommendation only, not this verdict.</p>
+    </div>}
     {!record.support_available && <p>Evidence references were not frozen in this older snapshot.</p>}
     {record.facts.length === 0 && <p>No supplier fact supports this rule conclusion.</p>}
     {record.facts.map((f) => <div className="fact-block" key={f.id}>

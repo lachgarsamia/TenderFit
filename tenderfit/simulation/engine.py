@@ -194,7 +194,7 @@ def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineC
     simulated = apply_changes(snap, sim["changes"])
     live = {r["id"]: r for r in conn.execute("SELECT * FROM requirement WHERE id = ANY(%s)",
                                              ([r["id"] for r in snap.requirements],))}
-    overridden = overrides(conn, profile_id)
+    overridden = overrides(conn, profile_id) if snap.overridden is None else {}
     reached, stale = impact(conn, sim, snap, simulated)
     baseline = must(conn.execute("SELECT recommendation, finished_at, created_at FROM assessment WHERE id = %s",
                                  (snap.assessment_id,)).fetchone())
@@ -228,12 +228,13 @@ def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineC
                 if e["requirement_id"] in (req["id"], None) and e["input"] != "all":
                     r.input_drift.append({**e, "since": "creation" if when.endswith("created") else "baseline"})
                     if e["requirement_id"] == req["id"]:
-                        r.notes.append(f"{when}, {e['detail']}; control and simulated both use the current value")
+                        usage = "the value was frozen at creation" if snap.answers is not None and e["input"] in ("answers", "overrides") else "control and simulated both use the current value"
+                        r.notes.append(f"{when}, {e['detail']}; {usage}")
         rows.append(r)
-        is_overridden = any(i in overridden for i in _lineage(conn, row))
+        is_overridden = any(i in overridden for i in _lineage(conn, row)) if snap.overridden is None else False
         label = _source_label(conn, row)
-        vs_control.append(_v(req, c, is_overridden, label))
-        vs_simulated.append(_v(req, s, is_overridden, label))
+        vs_control.append(_v(req, c, control.overridden.get(req["id"], False) if control.overridden is not None else is_overridden, label))
+        vs_simulated.append(_v(req, s, simulated.overridden.get(req["id"], False) if simulated.overridden is not None else is_overridden, label))
     attributed = attribution.analyze(rows, snap, sim["changes"],
                                      lambda state, rid: _decide(conn, snap, state, live[rid], config))
     inv = docs.inventory(conn, snap.version_id, profile_id)
@@ -241,7 +242,7 @@ def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineC
     rec_simulated = lot_dimensions(conn, snap.version_id, profile_id, vs_simulated, inv, simulated.facts, _ctx(simulated), config)
     execution = {
         "snapshot_sha256": sim["snapshot_sha256"],  # covers the frozen part only
-        "frozen": list(inputs.FROZEN) + (["evidence references and verification at creation"] if snap.support is not None else []),
+        "frozen": list(inputs.FROZEN) + (["evidence references and verification at creation"] if snap.support is not None else []) + (["answers", "overrides"] if snap.answers is not None else []),
         "live_inputs": {name: {"tables": list(inputs.TABLES[name]), "at_run": d["sha256"],
                                "at_creation": ((at_creation or {}).get(name) or {}).get("sha256"),
                                "changed": ((at_creation or {}).get(name) or {}).get("sha256") != d["sha256"]}
@@ -252,6 +253,10 @@ def _evaluate(conn: Conn, profile_id: int, simulation_id: int, config: PipelineC
                            config.name, input_drift={"since_creation": since_creation, "since_baseline": since_baseline},
                            execution=execution)
     summary["attribution"] = attributed
+    summary["override_changes"] = [{"requirement_id": rid, "before": (control.overridden or {}).get(rid, False), "after": value,
+                                    "detail": "Hypothetical override changes aggregation only; the requirement verdict is unchanged."}
+                                   for rid, value in (simulated.overridden or {}).items()
+                                   if value != (control.overridden or {}).get(rid, False)]
     return rows, summary
 
 
@@ -266,7 +271,8 @@ def _decide(conn: Conn, snap: Snapshot, s: Scenario, live: dict, config: Pipelin
         return None
     full = {**live, **{k: req[k] for k in REQUIREMENT_FIELDS}}
     d = decide(conn, snap.version_id, full, s.facts, _ctx(s), NO_MODEL, 0.0, config=config, profile_id=snap.profile_id,
-               conditions=req["conditions"], interpret=False)
+               conditions=req["conditions"], interpret=False,
+               answers=s.answers.get(req["id"], []) if s.answers is not None else None)
     if d.decided_by == "needs_model":
         return None
     if d.decided_by != "rule" or d.cost or d.tokens:

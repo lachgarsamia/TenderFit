@@ -38,6 +38,11 @@ def record(decision: dict, state: Scenario, hypothesis: Scenario, requirement_id
                        "origin": "modified" if changes and not control else "actual", "changes": changes if not control else []})
     assumptions = [{"ordinal": i, "change": dump_change(c)} for i, c in zip(hypothesis.change_ordinals, hypothesis.changes, strict=True)
                    if getattr(c, "requirement_id", None) == requirement_id] if not control else []
-    return {"citations": decision["citations"], "facts": facts, "params": params,
+    decision_inputs = None
+    if state.answers is not None:
+        decision_inputs = {"answers": state.answers.get(requirement_id, []),
+                           "overridden": (state.overridden or {}).get(requirement_id, False),
+                           "origin": "modified" if not control and any(c.kind in ("set_requirement_answer", "set_override") and getattr(c, "requirement_id", None) == requirement_id for c in hypothesis.changes) else "actual"}
+    return {"decision_inputs": decision_inputs, "citations": decision["citations"], "facts": facts, "params": params,
             "requirement_assumptions": assumptions, "needs_human": decision["needs_human"],
             "gaps": decision["gaps"], "support_available": state.snapshot.support is not None}

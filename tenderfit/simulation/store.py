@@ -61,7 +61,7 @@ def create(conn: Conn, profile_id: int, baseline_assessment_id: int, created_by:
         # The live inputs the snapshot does not freeze, as they are now. drift cannot be updated later (019's guard).
         drift = {**drift, "live_inputs_at_creation": inputs.read(conn, snap)}
     apply_changes(snap, parsed)  # every change valid against the snapshot, in order, or SimulationError naming it
-    return _insert(conn, profile_id, snap, snap.sha256(), drift, title, created_by, parsed, parent_id=None)
+    return _insert(conn, profile_id, snap, snap.sha256(), drift, title, created_by, parsed, parent_id=None, engine_version=ENGINE_VERSION)
 
 
 def create_variation(conn: Conn, profile_id: int, parent_id: int, created_by: str, title: str | None = None,

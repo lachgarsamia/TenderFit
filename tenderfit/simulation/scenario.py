@@ -22,6 +22,8 @@ from tenderfit.simulation.changes import (
     SetFactValidity,
     SetFactValue,
     SetNoticeField,
+    SetOverride,
+    SetRequirementAnswer,
     SetRequirementText,
     SimulationError,
     parse_change,
@@ -44,6 +46,9 @@ class Scenario:
     fact_changes: dict[int, list[dict]] = field(default_factory=dict)
     change_ordinals: list[int] = field(default_factory=list)
 
+    answers: dict[int, list[str]] | None = None
+    overridden: dict[int, bool] | None = None
+
     @property
     def as_of(self) -> date:
         return self.snapshot.as_of
@@ -53,6 +58,7 @@ def apply_changes(snapshot: Snapshot, changes: list, *, include: set[int] | None
     """An optional subset retains original change ordinals and added-fact identities. Missing prerequisites fail validation."""
     s = Scenario(snapshot, [replace(f, value=copy.deepcopy(f.value)) for f in snapshot.facts], dict(snapshot.fields),
                  {r["id"]: copy.deepcopy(r) for r in snapshot.requirements})
+    s.answers, s.overridden = copy.deepcopy(snapshot.answers), copy.deepcopy(snapshot.overridden)
     if include is not None and not include <= set(range(1, len(changes) + 1)):
         raise SimulationError("unknown change ordinal in subset")
     added = 0
@@ -122,7 +128,16 @@ def _clean(attribute: str, label: str, value: dict) -> tuple[str, dict]:
 
 
 def _apply(s: Scenario, c: HypotheticalChange, *, added_id: int) -> None:
-    if isinstance(c, SetConditionBound):
+    if isinstance(c, (SetRequirementAnswer, SetOverride)):
+        _requirement(s, c.requirement_id)
+        if s.answers is None or s.overridden is None:
+            raise SimulationError("this older snapshot did not freeze answers and overrides; create a new scenario from the assessment")
+        if isinstance(c, SetRequirementAnswer):
+            s.answers[c.requirement_id] = [c.answer.strip()] if c.answer is not None else []
+        else:
+            s.overridden[c.requirement_id] = c.on
+        s.touched.add(("requirement", str(c.requirement_id)))
+    elif isinstance(c, SetConditionBound):
         row = _condition(s, c.requirement_id, c.condition, NUMERIC)
         row["condition"] = {**row["condition"], "bound": c.bound}
         s.touched.add(("requirement", str(c.requirement_id)))

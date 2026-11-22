@@ -8,6 +8,7 @@ import re
 import threading
 
 import psycopg
+import pytest
 from psycopg.types.json import Jsonb
 
 from tenderfit.db import connect
@@ -20,6 +21,18 @@ from tests.test_simulation_api import api as _api
 from tests.test_simulation_api import lead, new
 
 base, api = _base, _api  # fixtures, shared with test_simulation.py and test_simulation_api.py
+
+@pytest.fixture(autouse=True)
+def legacy_decision_inputs(monkeypatch):
+    """Keep these live-input regression tests on sim-v2; sim-v3 freezing is covered in test_simulation_answers."""
+    original = store.take_snapshot
+    def legacy(*args, **kwargs):
+        snap, drift = original(*args, **kwargs)
+        snap.answers = snap.overridden = snap.decision_drift = None
+        return snap, drift
+    monkeypatch.setattr(store, "take_snapshot", legacy)
+    monkeypatch.setattr(store, "ENGINE_VERSION", "sim-v2")
+
 
 TABLE = re.compile(r"\b(?:FROM|JOIN)\s+([a-z_]+)", re.I)
 
@@ -177,6 +190,8 @@ def test_every_table_a_run_reads_is_frozen_or_tracked(base, monkeypatch):
     db = base["db"]
     sid = store.create(db, base["atlas"], base["a"], "tester", as_of=TODAY)
     for c in valid_changes(base):
+        if c["kind"] in ("set_requirement_answer", "set_override"):
+            continue
         store.add_change(db, base["atlas"], sid, c)
     reads: set[str] = set()
     real_execute, real_evaluate = psycopg.Cursor.execute, engine._evaluate

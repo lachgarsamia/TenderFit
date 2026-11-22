@@ -23,7 +23,9 @@ export type Change = { kind: string; [field: string]: unknown };
 
 export type InputDrift = { input: string; requirement_id: number | null; detail: string };
 
+export type OverrideChange = { requirement_id: number; before: boolean; after: boolean; detail: string };
 export type Summary = {
+  override_changes?: OverrideChange[];
   attribution?: { basis: string; decision_limit: number; decisions: number; limited: boolean };
   requirements: number;
   changed: { requirement_id: number; statement: string; obligation: string; from: Status; to: Status }[];
@@ -45,6 +47,7 @@ export type Simulation = {
 };
 
 export type Provenance = {
+  decision_inputs?: { answers: string[]; overridden: boolean; origin: string } | null;
   citations: { passage_id: number; quote: string }[];
   facts: { id: number; label: string; origin: "actual" | "modified" | "hypothetical" | "removed";
     value: { [key: string]: unknown }; evidence_status: string; valid_until: string | null; declaration_confirmed: boolean;
@@ -106,6 +109,7 @@ export type InputCondition = {
   bound: number | string | null; match: string | null; unit: string | null; accepts: ("set_condition_bound" | "set_condition_match")[];
 };
 export type InputRequirement = {
+  answers?: string[]; overridden?: boolean;
   id: number; statement: string; obligation: string; category: string; baseline_status: Status | null;
   quote: string | null; passage_id: number | null; conditions: InputCondition[];
 };
@@ -114,6 +118,7 @@ export type InputFact = {
   valid_until: string | null; editable_keys: string[];
 };
 export type Inputs = {
+  decision_inputs_frozen?: boolean;
   hypothetical: false; assessment_id: number; lot_id: number; as_of: string;
   requirements: InputRequirement[]; facts: InputFact[]; fields: { "notice.deadline"?: string | null; "lot.quantity"?: number | null };
   fact_kinds: Record<string, { keys: Record<string, "text" | "number" | "list" | "boolean">; required: string | null }>;
@@ -137,6 +142,7 @@ export type ChangeReach = {
 export type Highlights = Record<"blockers_resolved" | "blockers_now_unknown" | "blockers_introduced" | "uncertainties_resolved" |
   "now_needs_confirmation" | "needs_model", number[]>;
 export type ComparedScenario = {
+  override_changes?: OverrideChange[];
   id: number; title: string | null; parent_id: number | null; as_of: string; snapshot_sha256: string; changes: ChangeReach[];
   recommendation: Summary["recommendation"] | null; counts: Record<Direction, number>; transitions: Record<string, number>;
   highlights: Highlights; no_effect: boolean; input_drift: Summary["input_drift"]; drift: number[];

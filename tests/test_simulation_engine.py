@@ -276,11 +276,11 @@ def test_a_write_attempted_during_evaluation_is_refused_by_postgres(base, monkey
     sid = simulate(base, [])
     before = live_fingerprint(db)
 
-    def writes(conn, profile_id):
+    def writes(conn, *args, **kwargs):
         conn.execute("INSERT INTO verdict_cache (key, result) VALUES ('poison', '{}')")
         return {}
 
-    monkeypatch.setattr(engine, "overrides", writes)
+    monkeypatch.setattr(engine, "decide", writes)
     with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
         engine.run(db, base["atlas"], sid)
     assert live_fingerprint(db) == before

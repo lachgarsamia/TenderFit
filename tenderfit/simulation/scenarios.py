@@ -57,9 +57,11 @@ def view(snap: Snapshot) -> dict:
     """The snapshot as a supplier builds changes from it. Every value here is actual (frozen from the live profile and the
     tender); nothing hypothetical is in it. `accepts` lists the change kinds each condition takes."""
     return {
+        "decision_inputs_frozen": snap.answers is not None,
         "assessment_id": snap.assessment_id, "lot_id": snap.lot_id, "as_of": snap.as_of.isoformat(),
         "requirements": [{
             "id": r["id"], "statement": r["statement"], "obligation": r["obligation"], "category": r["category"],
+            "answers": (snap.answers or {}).get(r["id"], []), "overridden": (snap.overridden or {}).get(r["id"], False),
             "baseline_status": r["baseline_status"], "quote": r.get("quote"), "passage_id": r.get("passage_id"),
             "conditions": [_condition(c) for c in r["conditions"]],
         } for r in snap.requirements],
@@ -184,6 +186,7 @@ def _scenario(sim: dict, snap: Snapshot, rows: dict[int, dict]) -> dict:
     summary = sim["summary"] or {}
     return {"id": sim["id"], "title": sim["title"], "parent_id": sim.get("parent_id"), "as_of": sim["as_of"],
             "snapshot_sha256": sim["snapshot_sha256"], "changes": reach_by_change(sim["changes"], rows, hl, snap),
+            "override_changes": summary.get("override_changes", []),
             "recommendation": summary.get("recommendation"), "counts": counts, "transitions": transitions,
             "highlights": hl, "no_effect": counts["improved"] + counts["worsened"] == 0,
             "input_drift": summary.get("input_drift") or {"since_creation": [], "since_baseline": []},
@@ -194,7 +197,7 @@ def target(change: dict, added: int) -> str:
     """What a change touches, in impact.Reason's terms. `added` is this add_fact's position among added facts (1-based):
     scenario.apply_changes numbers added facts -1, -2, ... in order."""
     kind = change["kind"]
-    if kind in ("set_condition_bound", "set_condition_match", "set_requirement_text"):
+    if kind in ("set_condition_bound", "set_condition_match", "set_requirement_text", "set_requirement_answer", "set_override"):
         return f"requirement:{change['requirement_id']}"
     if kind == "add_fact":
         return f"fact:{-added}"
