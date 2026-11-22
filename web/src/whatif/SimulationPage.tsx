@@ -117,6 +117,10 @@ export default function SimulationPage() {
 
       {sim.status === "completed" && sim.summary && results && <>
         <ImpactSummary s={sim.summary} />
+        {(sim.summary.override_changes?.length ?? 0) > 0 && <Card title="Hypothetical overrides">
+          <p>These affect the recommendation only. Requirement verdicts remain unchanged.</p>
+          {sim.summary.override_changes!.map((c) => <p key={c.requirement_id}>{statement(c.requirement_id) ?? `Requirement ${c.requirement_id}`}: override {c.before ? "on" : "off"} → {c.after ? "on" : "off"}</p>)}
+        </Card>}
         {trace?.outcome?.outcome === "answered" && <AgentAnswer o={trace.outcome} />}
         <Comparison rows={results} simulationId={id} />
         <DriftAndLimits s={sim.summary} rows={results} />

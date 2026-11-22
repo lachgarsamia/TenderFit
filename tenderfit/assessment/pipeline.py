@@ -261,11 +261,12 @@ def _combine(d: Decision, results: list[ConditionResult]) -> Decision:
 
 def _model_decision(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Context, llm: LLM, budget_left: float,
                     emb, rr, config: PipelineConfig, profile_id: int | None, escalate: list[str], labels: set[str],
-                    open_conditions: list[str], paths: versioned.EvidencePaths | None = None) -> Decision:
+                    open_conditions: list[str], paths: versioned.EvidencePaths | None = None, answers: list[str] | None = None) -> Decision:
     rel = relevant_facts(facts, req["category"]) if config.rules else facts
-    answers = [r["answer"] for r in conn.execute(
-        """SELECT answer FROM question WHERE requirement_id = ANY(%s) AND answer IS NOT NULL
-           AND profile_id IS NOT DISTINCT FROM %s ORDER BY answered_at""", (_lineage(conn, req), profile_id))]
+    if answers is None:
+        answers = [r["answer"] for r in conn.execute(
+            """SELECT answer FROM question WHERE requirement_id = ANY(%s) AND answer IS NOT NULL
+               AND profile_id IS NOT DISTINCT FROM %s ORDER BY answered_at""", (_lineage(conn, req), profile_id))]
     if not rel and config.corrective and not answers:
         return Decision(UNKNOWN, "no fact in your profile bears on this, so it was not sent for interpretation", "guard",
                         citations=[(req["passage_id"], req["quote"])], escalate=escalate + ["no relevant fact"],
@@ -329,8 +330,9 @@ def _model_decision(conn: Conn, version_id: int, req: dict, facts: list[Fact], c
 def decide(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Context, llm: LLM,
            budget_left: float, emb: Embedder | None = None, rr: Reranker | None = None,
            config: PipelineConfig = PipelineConfig("B2"), profile_id: int | None = None, *,
-           conditions: list[dict] | None = None, interpret: bool = True) -> Decision:
+           conditions: list[dict] | None = None, interpret: bool = True, answers: list[str] | None = None) -> Decision:
     """conditions: evaluate these condition rows instead of the requirement's stored ones (a simulation's hypothesis).
+    answers=None preserves live reads; an explicit list (including []) replaces them.
     interpret=False never calls the model: a requirement the rules cannot settle is returned decided_by "needs_model",
     unless a mandatory rule already fails it, which no reading of the other conditions could change."""
     source = conn.execute("SELECT text FROM passage WHERE id = %s", (req["passage_id"],)).fetchone()
@@ -342,9 +344,12 @@ def decide(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Conte
     open_results = [c for c in results if not c.rule and c.mandatory]
     if any(c.rule for c in results) and not open_results:
         d = _from_rules(req, results, escalate)
-        answered = conn.execute(
-            """SELECT answer FROM question WHERE requirement_id = ANY(%s) AND answer IS NOT NULL AND profile_id IS NOT DISTINCT FROM %s
-               ORDER BY answered_at DESC LIMIT 1""", (_lineage(conn, req), profile_id)).fetchone()
+        if answers is None:
+            answered = conn.execute(
+                """SELECT answer FROM question WHERE requirement_id = ANY(%s) AND answer IS NOT NULL AND profile_id IS NOT DISTINCT FROM %s
+                   ORDER BY answered_at DESC LIMIT 1""", (_lineage(conn, req), profile_id)).fetchone()
+        else:
+            answered = {"answer": answers[-1]} if answers else None
         if d.status == UNKNOWN:
             d.escalate.append("rule found no evidence")
             if answered:  # the answer is on record: do not ask again, and do not treat it as proof
@@ -354,7 +359,7 @@ def decide(conn: Conn, version_id: int, req: dict, facts: list[Fact], ctx: Conte
         d = _uninterpreted(req, results, escalate)
     else:
         labels_open = [c.label for c in open_results] if len(results) > 1 else []
-        d = _model_decision(conn, version_id, req, facts, ctx, llm, budget_left, emb, rr, config, profile_id, escalate, labels, labels_open, paths)
+        d = _model_decision(conn, version_id, req, facts, ctx, llm, budget_left, emb, rr, config, profile_id, escalate, labels, labels_open, paths, answers)
         d = _combine(d, results)
     if config.rules:
         d.params = list(dict.fromkeys(d.params + [p for c in results if c.rule for p in c.rule.params]))

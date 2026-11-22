@@ -12,6 +12,8 @@ import { describeChange, evidenceLabel } from "./describe";
  * scenario could only ever say "needs reading". */
 export const KIND_LABEL: Record<string, string> = {
   set_condition_bound: "Change a requirement's limit",
+  set_requirement_answer: "Suppose you answered a requirement differently",
+  set_override: "Suppose a blocker override were on or off",
   set_condition_match: "Change the standard or document a requirement asks for",
   set_fact_value: "Change a value in one of your profile facts",
   set_fact_validity: "Change when a profile fact expires",
@@ -141,6 +143,7 @@ export function ChangeForm({ inputs, draft, onAdd }: { inputs: Inputs; draft: Ch
   }));
   const facts = [...inputs.facts, ...added];
   const chosenFact = facts.find((f) => String(f.id) === target);
+  const chosenReq = inputs.requirements.find((r) => String(r.id) === target);
   const chosenCond = conditions.find((x) => x.id === target);
 
   useEffect(() => { setTarget(""); setValue(""); setKey(""); setProblem(null); }, [kind]);
@@ -151,6 +154,15 @@ export function ChangeForm({ inputs, draft, onAdd }: { inputs: Inputs; draft: Ch
 
   const build = (): Change | string => {
     switch (kind) {
+      case "set_requirement_answer":
+        if (!inputs.decision_inputs_frozen || !chosenReq) return "Choose a requirement from a new scenario.";
+        if (key === "remove") return { kind, requirement_id: chosenReq.id, answer: null };
+        if (!value.trim() || value.trim().length > 2000) return "Enter an answer of 1 to 2000 characters.";
+        return { kind, requirement_id: chosenReq.id, answer: value.trim() };
+      case "set_override":
+        if (!inputs.decision_inputs_frozen || !chosenReq) return "Choose a requirement from a new scenario.";
+        if (!["on", "off"].includes(value)) return "Choose whether the hypothetical override is on or off.";
+        return { kind, requirement_id: chosenReq.id, on: value === "on" };
       case "set_condition_bound": {
         if (!chosenCond) return "Choose a requirement.";
         const n = Number(value);
@@ -209,9 +221,27 @@ export function ChangeForm({ inputs, draft, onAdd }: { inputs: Inputs; draft: Ch
   return <form className="change-form" onSubmit={(e) => { e.preventDefault(); add(build()); }} aria-label="Add a hypothetical change">
     <label className="field"><span>Kind of change</span>
       <select value={kind} onChange={(e) => setKind(e.target.value)}>
-        {Object.entries(KIND_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        {Object.entries(KIND_LABEL).filter(([k]) => inputs.decision_inputs_frozen || !["set_requirement_answer", "set_override"].includes(k)).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
       </select></label>
 
+    {(kind === "set_requirement_answer" || kind === "set_override") && <>
+      <label className="field"><span>Requirement</span><select value={target} onChange={(e) => setTarget(e.target.value)}>
+        <option value="">Choose a requirement</option>{inputs.requirements.map((r) => <option key={r.id} value={r.id}>{r.statement}</option>)}
+      </select></label>
+      {chosenReq && <>
+        <p className="small"><Tag>Actual, frozen</Tag> {kind === "set_requirement_answer" ? (chosenReq.answers?.join("; ") || "No answer recorded") : `Override ${chosenReq.overridden ? "on" : "off"}`}</p>
+        {kind === "set_requirement_answer" ? <>
+          <p className="small warn-text">A hypothetical answer is a declaration, not evidence. It cannot prove a requirement is met. Text-only requirements still need reading.</p>
+          <label className="field"><span>Hypothetical answer action</span><select value={key || "set"} onChange={(e) => setKey(e.target.value)}>
+            <option value="set">Replace the answer</option><option value="remove">Remove all answers</option></select></label>
+          {key !== "remove" && <label className="field"><span>Suppose you answered</span><textarea value={value} maxLength={2000} onChange={(e) => setValue(e.target.value)} /></label>}
+        </> : <>
+          <p className="small warn-text">This hypothetical override affects the recommendation only. The requirement verdict stays unchanged.</p>
+          <label className="field"><span>Hypothetical override</span><select value={value} onChange={(e) => setValue(e.target.value)}>
+            <option value="">Choose on or off</option><option value="on">On</option><option value="off">Off</option></select></label>
+        </>}
+      </>}
+    </>}
     {(kind === "set_condition_bound" || kind === "set_condition_match") && <>
       {conditions.length === 0 ? <p className="small muted">No requirement in this assessment has a {kind === "set_condition_bound" ? "numeric limit" : "named standard or document"} that can be changed.</p> : <>
         <label className="field"><span>Requirement</span>

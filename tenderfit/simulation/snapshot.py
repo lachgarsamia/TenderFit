@@ -6,12 +6,12 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 
-from tenderfit.assessment.pipeline import LONDON, load_facts, lot_context
+from tenderfit.assessment.pipeline import LONDON, _lineage, load_facts, lot_context
 from tenderfit.db import Conn
 from tenderfit.rules.engine import Fact
 from tenderfit.simulation.changes import SimulationConflict, SimulationError, SimulationNotFound
 
-ENGINE_VERSION = "sim-v2"  # bump when what a simulation computes, or how, changes meaning
+ENGINE_VERSION = "sim-v3"  # bump when what a simulation computes, or how, changes meaning
 DATE_FIELDS = ("notice.deadline", "lot.contract_end")
 FACT_DATES = ("valid_until", "confirm_by", "confirmed_at")
 
@@ -30,10 +30,17 @@ class Snapshot:
     # None preserves the exact sim-v1 JSON and hash; new snapshots freeze an entry for every fact.
     support: dict[int, list[dict]] | None = None
 
+    answers: dict[int, list[str]] | None = None
+    overridden: dict[int, bool] | None = None
+    decision_drift: list[dict] | None = None
+
     def to_json(self) -> dict:
         return {"assessment_id": self.assessment_id, "profile_id": self.profile_id, "lot_id": self.lot_id,
                 "version_id": self.version_id, "as_of": self.as_of.isoformat(),
                 **({"schema_version": 2} if self.support is not None else {}),
+                **({"schema_version": 3, "answers": {str(k): v for k, v in self.answers.items()},
+                    "overridden": {str(k): v for k, v in (self.overridden or {}).items()},
+                    "decision_drift": self.decision_drift or []} if self.answers is not None else {}),
                 "facts": [{**_fact_json(f), **({"support": self.support.get(f.id, [])} if self.support is not None else {})} for f in self.facts], "requirements": self.requirements,
                 "fields": {k: (v.isoformat() if isinstance(v, date) else v) for k, v in self.fields.items()}}
 
@@ -42,7 +49,10 @@ class Snapshot:
         return cls(d["assessment_id"], d["profile_id"], d["lot_id"], d["version_id"], date.fromisoformat(d["as_of"]),
                    [_fact_from(f) for f in d["facts"]], d["requirements"],
                    {k: (date.fromisoformat(v) if k in DATE_FIELDS and v else v) for k, v in d["fields"].items()},
-                   {f["id"]: f.get("support", []) for f in d["facts"]} if d.get("schema_version") == 2 else None)
+                   {f["id"]: f.get("support", []) for f in d["facts"]} if d.get("schema_version", 1) >= 2 else None,
+                   {int(k): v for k, v in d["answers"].items()} if d.get("schema_version") == 3 else None,
+                   {int(k): v for k, v in d["overridden"].items()} if d.get("schema_version") == 3 else None,
+                   d.get("decision_drift") if d.get("schema_version") == 3 else None)
 
     def sha256(self) -> str:
         return hashlib.sha256(json.dumps(self.to_json(), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -87,9 +97,24 @@ def take_snapshot(conn: Conn, profile_id: int, assessment_id: int, as_of: date |
     except ValueError as e:
         raise SimulationError(f"the baseline's notice version cannot be read: {e}") from e
     reqs = []
+    answers, overridden, decision_drift = {}, {}, []
+    ran = a["finished_at"] or a["created_at"]
     for r in conn.execute(
             """SELECT r.*, v.id AS verdict_id, v.status AS verdict_status FROM verdict v JOIN requirement r ON r.id = v.requirement_id
                WHERE v.assessment_id = %s ORDER BY (r.obligation = 'mandatory') DESC, r.id""", (assessment_id,)).fetchall():
+        ids = _lineage(conn, r)
+        given = conn.execute("""SELECT answer, answered_at FROM question WHERE requirement_id = ANY(%s)
+                                AND answer IS NOT NULL AND profile_id IS NOT DISTINCT FROM %s
+                                ORDER BY answered_at, id""", (ids, profile_id)).fetchall()
+        overrides = conn.execute("""SELECT created_at FROM confirmation WHERE point = 'G6' AND decision = 'override'
+                                    AND profile_id = %s AND (payload->>'requirement_id')::bigint = ANY(%s)""",
+                                 (profile_id, ids)).fetchall()
+        answers[r["id"]] = [row["answer"] for row in given]
+        overridden[r["id"]] = bool(overrides)
+        for name, rows, timestamp in (("answers", given, "answered_at"), ("overrides", overrides, "created_at")):
+            if any(row[timestamp] and row[timestamp] > ran for row in rows):
+                decision_drift.append({"input": name, "requirement_id": r["id"],
+                                       "detail": f"an {name[:-1]} was recorded after the baseline ran (frozen at scenario creation)"})
         reqs.append({"id": r["id"], "statement": r["statement"], "quote": r["quote"], "category": r["category"],
                      "obligation": r["obligation"], "evidence_needed": list(r["evidence_needed"]),
                      "equivalent_allowed": r["equivalent_allowed"], "passage_id": r["passage_id"],
@@ -97,6 +122,7 @@ def take_snapshot(conn: Conn, profile_id: int, assessment_id: int, as_of: date |
                      "conditions": _conditions(conn, r)})
     snap = Snapshot(assessment_id, profile_id, a["lot_id"], a["version_id"], as_of,
                     load_facts(conn, profile_id, a["lot_id"], a["version_id"]), reqs, dict(ctx.fields))
+    snap.answers, snap.overridden, snap.decision_drift = answers, overridden, decision_drift
     snap.support = {f.id: [] for f in snap.facts}
     for row in conn.execute(
             """SELECT s.fact_id, s.evidence_file_id, s.page, s.quote, s.verified,

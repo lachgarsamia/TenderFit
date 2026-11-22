@@ -72,6 +72,8 @@ export function describeChange(c: Change, statement?: (id: number) => string | u
   const req = (id: unknown) => statement?.(Number(id)) ? `"${statement(Number(id))}"` : `requirement ${id}`;
   const f = (id: unknown) => fact?.(Number(id)) ? `"${fact(Number(id))}"` : `Profile fact ${id}`;
   switch (c.kind) {
+    case "set_requirement_answer": return c.answer === null ? `${req(c.requirement_id)}: suppose no answer were recorded` : `${req(c.requirement_id)}: suppose you answered "${String(c.answer)}" (a declaration, not proof)`;
+    case "set_override": return `${req(c.requirement_id)}: hypothetical override ${c.on ? "on" : "off"}; recommendation only, verdict unchanged`;
     case "set_condition_bound": return `${req(c.requirement_id)}: the limit becomes ${c.bound}`;
     case "set_condition_match": return `${req(c.requirement_id)}: accepts ${String(c.match)}`;
     case "set_requirement_text": return `${req(c.requirement_id)}: reworded as "${String(c.statement)}"`;
